@@ -83,6 +83,8 @@ input:focus{outline:none;border-color:var(--gold)}
 .chat-msg.me .chat-bubble{background:#3d2e19;color:var(--gold2)}
 .chat-msg.other .chat-bubble{background:#1a1a1a;color:#b0a080}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+.modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal{background:linear-gradient(180deg,#241c14,#0e0b08);border:1px solid var(--gold);border-radius:6px;width:100%;max-width:360px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.9)}
 </style>
 </head>
 <body>
@@ -91,8 +93,8 @@ input:focus{outline:none;border-color:var(--gold)}
 <!-- ================= Firebase 模块脚本 ================= -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-  import { getDatabase, ref, set, push, onValue, query, orderByChild, limitToLast, get, update, remove, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+  import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile, linkWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getDatabase, ref, set, push, onValue, query, orderByChild, limitToLast, get, update, remove, serverTimestamp, off } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDWw2HU6forTQRcLeXjrlef2xAjZWGh23U",
@@ -108,17 +110,30 @@ input:focus{outline:none;border-color:var(--gold)}
   const auth = getAuth(app);
   const db = getDatabase(app);
 
-  window.FB = { auth, db, ref, set, push, onValue, query, orderByChild, limitToLast, get, update, remove, serverTimestamp };
+  window.FB = { auth, db, ref, set, push, onValue, query, orderByChild, limitToLast, get, update, remove, serverTimestamp, off };
+  window.AUTH_API = { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile, linkWithCredential, EmailAuthProvider };
 
-  signInAnonymously(auth).catch(err => {
-    console.error("匿名登录失败:", err);
-    window.FB_ERROR = err.message;
-  });
-
+  // 监听登录状态变化
   onAuthStateChanged(auth, user => {
     if (user) {
       window.MY_UID = user.uid;
-      console.log("已连接 Firebase，UID:", user.uid);
+      window.MY_EMAIL = user.email || null;
+      window.MY_IS_ANON = user.isAnonymous;
+      console.log("登录成功 UID:", user.uid, "匿名:", user.isAnonymous);
+      
+      // 如果是已登录账号，尝试拉取云端存档
+      if (window.onAuthReady) window.onAuthReady();
+    } else {
+      window.MY_UID = null;
+      window.MY_EMAIL = null;
+      window.MY_IS_ANON = true;
+      // 如果是初次进入，自动使用匿名登录
+      import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js").then(m => {
+        m.signInAnonymously(auth).catch(err => {
+          console.error("匿名登录失败:", err);
+          window.FB_ERROR = err.message;
+        });
+      });
     }
   });
 </script>
@@ -181,6 +196,7 @@ const POTIONS={
 
 const GACHA_PRICE=1500;
 const WEAPON_REFRESH_COST=300;
+const CREATE_GUILD_COST=5000;
 
 const ORIGINS={
   julius:{name:'尤利乌帝国',icon:'👑',desc:'铁冠之下',bonus:{atkMul:1.06,hpMul:1.03}},
@@ -234,14 +250,6 @@ const TITLES=[
   {name:'弑神者',b:{atk:12,crit:5}},{name:'无声的婚约',b:{hp:20,mp:20}},{name:'自由的黄金鸟',b:{atk:10,spd:10}}
 ];
 
-const GUILDS=[
-  {name:'万重俱乐部',icon:'🌀',desc:'老牌豪门',b:{atk:6}},
-  {name:'巡天俱乐部',icon:'🌌',desc:'三连冠王朝',b:{spd:6}},
-  {name:'神心公会',icon:'⚔️',desc:'剑圣之家',b:{atk:5,def:5}},
-  {name:'天府公会',icon:'🏯',desc:'蜀地豪强',b:{hp:10}},
-  {name:'山海公会',icon:'⛰️',desc:'只问实力',b:{def:8}}
-];
-
 const SLOTS=[
   {id:'weapon',name:'武器',icon:'⚔️'},{id:'helmet',name:'头盔',icon:'⛑️'},{id:'armor',name:'铠甲',icon:'🥋'},
   {id:'boots',name:'靴子',icon:'👢'},{id:'bracer',name:'护腕',icon:'🦾'},{id:'bracelet',name:'手镯',icon:'📿'},
@@ -261,52 +269,163 @@ const STAT_KEYS=['hp','mp','atk','def','spd','crit'];
 const STAT_LABELS={hp:'生命',mp:'斗气',atk:'攻击',def:'防御',spd:'速度',crit:'暴击'};
 
 let S=null,B=null;
-let UI={tab:'explore',region:0,classSel:null,originSel:'julius',notif:'',creating:true,shopTab:'potion'};
+let UI={tab:'explore',region:0,classSel:null,originSel:'julius',notif:'',creating:true,shopTab:'potion',guildTab:'list',showAuthModal:false,authMode:'login'};
 let notifTimer=null;
 
-// ================= 社交状态 =================
+// 社交与公会状态
 let social={
-  friends:[],
-  requests:[],
-  leaderboard:[],
-  chatFriend:null,
-  chatMessages:[],
-  chatUnsub:null,
-  online:false,
-  listenersStarted:false
+  friends:[], requests:[], leaderboard:[],
+  chatFriend:null, chatMessages:[], chatUnsub:null,
+  online:false, listenersStarted:false,
+  allGuilds: [], myGuildData: null, guildListenerRef: null
 };
 
 function socialReady(){ return !!(window.FB && window.MY_UID); }
 
 function notify(msg){UI.notif=msg;const el=document.getElementById('notif');if(el){el.textContent=msg;el.style.display='block';}clearTimeout(notifTimer);notifTimer=setTimeout(()=>{UI.notif='';const e=document.getElementById('notif');if(e)e.style.display='none';},2200);}
-function save(){try{localStorage.setItem('holycrown_save',JSON.stringify(S));}catch(e){}}
+
+// ================= 核心存档与账号逻辑 =================
+function save(){
+  try{ localStorage.setItem('holycrown_save',JSON.stringify(S)); }catch(e){}
+  // 如果是正式账号，同步到云端
+  if(window.MY_UID && !window.MY_IS_ANON && window.FB){
+    FB.set(FB.ref(FB.db, 'saves/' + MY_UID), S).catch(e => console.warn("云存档失败", e));
+  }
+}
 
 function load(){
   try{
     const d=localStorage.getItem('holycrown_save');
-    if(d){
-      S=JSON.parse(d);
-      if(!S.skillbooks)S.skillbooks=[];
-      if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0};
-      if(!S.shards)S.shards=0;
-      if(!S.titles)S.titles=[];
-      if(!S.inv)S.inv=[];
-      if(!S.weaponStock)S.weaponStock=[];
-      if(!S.equip)S.equip={weapon:null,helmet:null,armor:null,boots:null,bracer:null,bracelet:null,ring:null,necklace:null};
-      if(S.adv===undefined)S.adv=null;
-      if(S.sub===undefined)S.sub=null;
-      if(S.crown===undefined)S.crown=null;
-      if(S.guild===undefined)S.guild=null;
-      if(!S.guildLv)S.guildLv=1;
-      if(!S.contrib)S.contrib=0;
-      if(!S.mode)S.mode='online';
-      UI.creating=false;
-      return true;
-    }
+    if(d){ S=JSON.parse(d); fixSaveData(); return true; }
   }catch(e){}
   return false;
 }
 
+async function loadCloudSave(){
+  if(!window.MY_UID || window.MY_IS_ANON || !window.FB) return false;
+  try {
+    const snap = await FB.get(FB.ref(FB.db, 'saves/' + MY_UID));
+    if(snap.exists()){
+      S = snap.val();
+      fixSaveData();
+      localStorage.setItem('holycrown_save', JSON.stringify(S));
+      return true;
+    }
+  } catch(e) { console.warn("拉取云存档失败", e); }
+  return false;
+}
+
+function fixSaveData(){
+  if(!S)return;
+  if(!S.skillbooks)S.skillbooks=[];
+  if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0};
+  if(!S.shards)S.shards=0;
+  if(!S.titles)S.titles=[];
+  if(!S.inv)S.inv=[];
+  if(!S.weaponStock)S.weaponStock=[];
+  if(!S.equip)S.equip={weapon:null,helmet:null,armor:null,boots:null,bracer:null,bracelet:null,ring:null,necklace:null};
+  if(S.adv===undefined)S.adv=null;
+  if(S.sub===undefined)S.sub=null;
+  if(S.crown===undefined)S.crown=null;
+  if(S.guild && typeof S.guild === 'string') { S.guild = null; S.guildId = null; }
+  if(!S.guildId) S.guildId = null;
+  if(!S.mode)S.mode='online';
+}
+
+// ================= 账号面板 UI =================
+function renderAuthModal(){
+  if(!UI.showAuthModal) return '';
+  const isLogin = UI.authMode === 'login';
+  return `
+  <div class="modal-mask">
+    <div class="modal">
+      <h3 class="center" style="margin-bottom:16px">${isLogin?'登录账号':'注册新账号'}</h3>
+      <div style="margin-bottom:12px">
+        <input id="authEmail" type="email" placeholder="输入邮箱地址" style="margin-bottom:8px">
+        <input id="authPass" type="password" placeholder="输入密码（至少6位）">
+      </div>
+      <button onclick="doAuth('${UI.authMode}')" style="width:100%;padding:12px;margin-bottom:12px">
+        ${isLogin?'登 录':'注 册 并 登 录'}
+      </button>
+      <div class="center">
+        <button onclick="UI.authMode='${isLogin?'register':'login'}';render()" style="background:none;border:none;color:var(--gold2);font-size:12px;text-decoration:underline">
+          ${isLogin?'没有账号？点此注册':'已有账号？点此登录'}
+        </button>
+        <button onclick="UI.showAuthModal=false;render()" style="background:none;border:none;color:#7a6a52;font-size:12px;margin-left:10px">取消</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function doAuth(mode){
+  const email = document.getElementById('authEmail').value.trim();
+  const pass = document.getElementById('authPass').value.trim();
+  if(!email || !pass) { notify('请填写邮箱和密码'); return; }
+  if(pass.length < 6) { notify('密码至少6位'); return; }
+
+  try {
+    if(mode === 'login') {
+      await window.AUTH_API.signInWithEmailAndPassword(window.FB.auth, email, pass);
+      notify('登录成功，正在同步云存档...');
+    } else {
+      const userCred = await window.AUTH_API.createUserWithEmailAndPassword(window.FB.auth, email, pass);
+      // 注册成功，如果当前有本地存档，上传到新账号
+      if(S) {
+        await FB.set(FB.ref(FB.db, 'saves/' + userCred.user.uid), S);
+      }
+      notify('注册成功！');
+    }
+    UI.showAuthModal = false;
+    // onAuthStateChanged 会自动触发，这里只需重新渲染
+    render();
+  } catch(e) {
+    console.error(e);
+    if(e.code === 'auth/email-already-in-use') notify('该邮箱已被注册');
+    else if(e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential') notify('邮箱或密码错误');
+    else notify('操作失败: ' + e.message);
+  }
+}
+
+function logout(){
+  if(!confirm('确定要退出账号吗？请确保你已经记住了账号密码。')) return;
+  window.AUTH_API.signOut(window.FB.auth).then(() => {
+    notify('已退出，转为匿名游客');
+    S = null; B = null; UI.creating = true; UI.classSel = null;
+    try{ localStorage.removeItem('holycrown_save'); }catch(e){}
+    render();
+  });
+}
+
+// Firebase 登录状态改变后的回调
+window.onAuthReady = async () => {
+  if(window.MY_IS_ANON) {
+    // 匿名状态，正常加载本地存档
+    if(!S && !load()) render();
+    else { syncVitals(); render(); }
+  } else {
+    // 正式账号登录，拉取云存档
+    const hasCloud = await loadCloudSave();
+    if(hasCloud) {
+      notify('已加载云端存档');
+      syncVitals(); render();
+      if(typeof syncMyProfile === 'function') syncMyProfile();
+      if(typeof listenMyGuild === 'function') listenMyGuild();
+    } else {
+      // 云端没存档，看看本地有没有
+      if(!S) load();
+      if(S) {
+        // 把本地存档传上去
+        save();
+        syncVitals(); render();
+        notify('本地存档已上传至云端');
+      } else {
+        render(); // 新玩家
+      }
+    }
+  }
+};
+
+// ================= 其它游戏逻辑（保持原样） =================
 function playerStats(){
   const c=CLASSES[S.cls],L=S.level;
   let st={hp:c.hp+c.hpG*(L-1),mp:c.mp+c.mpG*(L-1),atk:c.atk+c.atkG*(L-1),def:c.def+c.defG*(L-1),spd:c.spd+c.spdG*(L-1),crit:c.crit};
@@ -316,7 +435,10 @@ function playerStats(){
   for(const k in S.equip){const e=S.equip[k];if(!e)continue;for(const s of STAT_KEYS)if(e[s])st[s]+=e[s];}
   if(S.crown){const cr=CROWNS.find(x=>x.name===S.crown.name);if(cr)for(const s in cr.b)st[s]=(st[s]||0)*(1+cr.b[s]/100);}
   for(const t of S.titles){const td=TITLES.find(x=>x.name===t);if(td&&td.b)for(const s in td.b)st[s]=(st[s]||0)+td.b[s];}
-  if(S.guild){const g=GUILDS.find(x=>x.name===S.guild);if(g)for(const s in g.b)st[s]=(st[s]||0)+g.b[s]*(1+S.guildLv*0.5);}
+  if(social.myGuildData){
+    const lvl = social.myGuildData.level || 1;
+    st.hp *= (1 + lvl * 0.03); st.atk *= (1 + lvl * 0.03); st.def *= (1 + lvl * 0.03); st.spd *= (1 + lvl * 0.03);
+  }
   for(const s in st)st[s]=Math.round(st[s]);
   return st;
 }
@@ -342,72 +464,31 @@ function genEquip(slot,ilvl,rarIdx,classReq){
   return item;
 }
 
-function canEquip(it){
-  if(!it||!it.reqClass)return true;
-  const reqs=Array.isArray(it.reqClass)?it.reqClass:[it.reqClass];
-  if(reqs.includes(S.cls))return true;
-  if(S.sub&&reqs.includes(S.sub))return true;
-  return false;
-}
-function reqLabel(it){
-  if(!it.reqClass)return '通用';
-  const reqs=Array.isArray(it.reqClass)?it.reqClass:[it.reqClass];
-  return reqs.map(k=>CLASSES[k]?CLASSES[k].name:k).join('/');
-}
+function canEquip(it){if(!it||!it.reqClass)return true;const reqs=Array.isArray(it.reqClass)?it.reqClass:[it.reqClass];if(reqs.includes(S.cls))return true;if(S.sub&&reqs.includes(S.sub))return true;return false;}
+function reqLabel(it){if(!it.reqClass)return '通用';const reqs=Array.isArray(it.reqClass)?it.reqClass:[it.reqClass];return reqs.map(k=>CLASSES[k]?CLASSES[k].name:k).join('/');}
 function randomWeaponReq(){return Math.random()<0.4?null:pick(CLASS_KEYS);}
 
 function genShopWeapon(){
-  const lv=clamp(S.level+rnd(-3,5),1,160);
-  const r=Math.random();
-  let rar;
-  if(r<0.35)rar=rnd(0,2);
-  else if(r<0.65)rar=rnd(2,4);
-  else if(r<0.88)rar=rnd(4,6);
-  else rar=rnd(6,8);
-  const req=randomWeaponReq();
-  const it=genEquip('weapon',lv,rar,req);
+  const lv=clamp(S.level+rnd(-3,5),1,160);const r=Math.random();let rar;
+  if(r<0.35)rar=rnd(0,2);else if(r<0.65)rar=rnd(2,4);else if(r<0.88)rar=rnd(4,6);else rar=rnd(6,8);
+  const it=genEquip('weapon',lv,rar,randomWeaponReq());
   it.shopPrice=Math.round((40+lv*18)*RAR[rar].m*rf(0.9,1.2));
   return it;
 }
-function refreshWeaponStock(){
-  S.weaponStock=[];
-  const n=rnd(4,5);
-  for(let i=0;i<n;i++)S.weaponStock.push(genShopWeapon());
-}
-function ensureWeaponStock(){
-  if(!S.weaponStock)S.weaponStock=[];
-  if(S.weaponStock.length===0)refreshWeaponStock();
-}
+function refreshWeaponStock(){S.weaponStock=[];const n=rnd(4,5);for(let i=0;i<n;i++)S.weaponStock.push(genShopWeapon());}
+function ensureWeaponStock(){if(!S.weaponStock)S.weaponStock=[];if(S.weaponStock.length===0)refreshWeaponStock();}
 
-function equipItem(idx){
-  const it=S.inv[idx];if(!it)return;
-  if(it.slot==='weapon'&&!canEquip(it)){notify('职业不符，无法装备');return;}
-  const old=S.equip[it.slot];S.equip[it.slot]=it;S.inv.splice(idx,1);if(old)S.inv.push(old);
-  syncVitals();save();render();
-  if(window.syncMyProfile)syncMyProfile();
-  notify('已装备 '+it.name);
-}
+function equipItem(idx){const it=S.inv[idx];if(!it)return;if(it.slot==='weapon'&&!canEquip(it)){notify('职业不符，无法装备');return;}const old=S.equip[it.slot];S.equip[it.slot]=it;S.inv.splice(idx,1);if(old)S.inv.push(old);syncVitals();save();render();if(window.syncMyProfile)syncMyProfile();notify('已装备 '+it.name);}
 function sellItem(idx){const it=S.inv[idx];if(!it)return;const price=Math.round((10+it.lvl*8)*RAR[it.rar].m);S.gold+=price;S.inv.splice(idx,1);save();render();notify('出售获得 '+fmt(price)+' CC');}
 
 function statLine(it){return STAT_KEYS.filter(k=>it[k]).map(k=>STAT_LABELS[k]+'+'+it[k]).join('　');}
-function statCompare(it){
-  const cur=S.equip[it.slot];
-  return STAT_KEYS.map(k=>{
-    const nv=it[k]||0,ov=cur?(cur[k]||0):0,diff=nv-ov;
-    if(nv===0&&(!cur||ov===0))return '';
-    let s='<span style="display:inline-block;margin-right:12px;white-space:nowrap">'+STAT_LABELS[k]+' '+(nv>0?'+'+nv:'0');
-    if(cur&&diff!==0){if(diff>0)s+=' <span style="color:#7fd4a0;font-weight:bold">▲+'+diff+'</span>';else s+=' <span style="color:#e88a7a;font-weight:bold">▼'+Math.abs(diff)+'</span>';}
-    s+='</span>';
-    return s;
-  }).join('');
-}
+function statCompare(it){const cur=S.equip[it.slot];return STAT_KEYS.map(k=>{const nv=it[k]||0,ov=cur?(cur[k]||0):0,diff=nv-ov;if(nv===0&&(!cur||ov===0))return '';let s='<span style="display:inline-block;margin-right:12px;white-space:nowrap">'+STAT_LABELS[k]+' '+(nv>0?'+'+nv:'0');if(cur&&diff!==0){if(diff>0)s+=' <span style="color:#7fd4a0;font-weight:bold">▲+'+diff+'</span>';else s+=' <span style="color:#e88a7a;font-weight:bold">▼'+Math.abs(diff)+'</span>';}s+='</span>';return s;}).join('');}
 function equipScore(it){return (it.hp||0)*0.5+(it.mp||0)*0.3+(it.atk||0)*2+(it.def||0)*1.5+(it.spd||0)*1.5+(it.crit||0)*3;}
 
 function makeEnemy(name,lv,isBoss){
   const bmHp=isBoss?1.8:1,bmAtk=isBoss?2.4:1,bmDef=isBoss?1.15:1;
   const e={name,lv,maxHp:Math.round((40+lv*20+lv*lv*0.55)*bmHp*rf(0.92,1.08)),atk:Math.round((5+lv*2.2)*bmAtk*rf(0.92,1.08)),def:Math.round((3+lv*1.5)*bmDef*rf(0.9,1.1)),spd:Math.round((6+lv*1.2)*rf(0.9,1.1)),isBoss};
-  e.hp=e.maxHp;
-  return e;
+  e.hp=e.maxHp;return e;
 }
 function enemyExp(e){return Math.round((10+e.lv*10+e.lv*e.lv*0.5)*(e.isBoss?2.5:1));}
 function enemyGold(e){return Math.round((8+e.lv*5+e.lv*e.lv*0.2)*(e.isBoss?3:1));}
@@ -432,8 +513,7 @@ function calcDmg(atk,def,mul,critRate,opts){
   const defFactor=opts.defFactor!==undefined?opts.defFactor:0.3;
   const spread=opts.spread!==undefined?opts.spread:0.08;
   const minMul=opts.minMul!==undefined?opts.minMul:0.15;
-  let base=atk*mul-def*defFactor;
-  base=Math.max(base,atk*minMul);
+  let base=atk*mul-def*defFactor;base=Math.max(base,atk*minMul);
   const isCrit=Math.random()*100<(critRate||0);
   let dmg=base*rf(1-spread,1+spread)*(isCrit?1.85:1);
   return {dmg:Math.max(1,Math.round(dmg)),crit:isCrit};
@@ -452,69 +532,34 @@ function applyBuff(sk){
 
 async function useSkill(idx){
   if(!B||B.over||B.busy)return;
-  B.busy=true;
-  const p=playerStats();
-  const skills=getSkills();
-  const sk=skills[idx];
+  B.busy=true;const p=playerStats();const skills=getSkills();const sk=skills[idx];
   if(!sk){B.busy=false;return;}
   if(sk.mp>S.mp){notify('斗气不足！');B.busy=false;return;}
-  S.mp-=sk.mp;
-  const e=B.enemy;
-
-  if(sk.t==='buff'){
-    applyBuff(sk);
-    B.log.push({t:'sys',m:'你使用了「'+sk.n+'」，状态提升！'});
-    render();await sleep(420);
-  } else if(sk.t==='heal'){
-    const heal=Math.round(p.atk*sk.mul+rf(0.9,1.1)*p.hp*0.05);
-    S.hp=Math.min(p.hp,S.hp+heal);
-    B.log.push({t:'heal',m:'✨ '+sk.n+' 恢复了 '+fmt(heal)+' 点生命'});
-    render();await sleep(420);
-  } else if(sk.t==='mana'){
-    const mana=Math.round(p.mp*sk.mul);
-    S.mp=Math.min(p.mp,S.mp+mana);
-    B.log.push({t:'heal',m:'💠 '+sk.n+' 恢复了 '+fmt(mana)+' 点斗气'});
-    render();await sleep(420);
-  } else {
-    const hits=sk.hits||1;
-    let total=0,anyCrit=false;
-    const critRate=p.crit+(B.critBuff?100:0);
-    for(let i=0;i<hits;i++){
-      const r=calcDmg(p.atk*(1+(B.atkBuff||0)),e.def*(1-B.eDefDown),sk.mul,critRate);
-      total+=r.dmg;anyCrit=anyCrit||r.crit;
-      await sleep(120);
-    }
-    e.hp-=total;
-    if(sk.n.includes('腐蚀'))B.eDefDown=Math.min(0.5,B.eDefDown+0.25);
+  S.mp-=sk.mp;const e=B.enemy;
+  if(sk.t==='buff'){applyBuff(sk);B.log.push({t:'sys',m:'你使用了「'+sk.n+'」，状态提升！'});render();await sleep(420);}
+  else if(sk.t==='heal'){const heal=Math.round(p.atk*sk.mul+rf(0.9,1.1)*p.hp*0.05);S.hp=Math.min(p.hp,S.hp+heal);B.log.push({t:'heal',m:'✨ '+sk.n+' 恢复了 '+fmt(heal)+' 点生命'});render();await sleep(420);}
+  else if(sk.t==='mana'){const mana=Math.round(p.mp*sk.mul);S.mp=Math.min(p.mp,S.mp+mana);B.log.push({t:'heal',m:'💠 '+sk.n+' 恢复了 '+fmt(mana)+' 点斗气'});render();await sleep(420);}
+  else {
+    const hits=sk.hits||1;let total=0,anyCrit=false;const critRate=p.crit+(B.critBuff?100:0);
+    for(let i=0;i<hits;i++){const r=calcDmg(p.atk*(1+(B.atkBuff||0)),e.def*(1-B.eDefDown),sk.mul,critRate);total+=r.dmg;anyCrit=anyCrit||r.crit;await sleep(120);}
+    e.hp-=total;if(sk.n.includes('腐蚀'))B.eDefDown=Math.min(0.5,B.eDefDown+0.25);
     B.log.push({t:anyCrit?'crit':'dmg',m:(anyCrit?'💥 暴击！':'')+sk.n+' 对 '+e.name+' 造成 '+fmt(total)+' 点伤害'+(hits>1?'（'+hits+'段）':'')});
     render();await sleep(420);
   }
-
   if(e.hp<=0){await winBattle();return;}
-
-  await sleep(260);
-  B.turn++;
+  await sleep(260);B.turn++;
   if(B.defBuffTurns>0){B.defBuffTurns--;if(B.defBuffTurns===0)B.defBuff=0;}
   if(B.atkBuffTurns>0){B.atkBuffTurns--;if(B.atkBuffTurns===0)B.atkBuff=0;}
   if(B.critBuffTurns>0){B.critBuffTurns--;if(B.critBuffTurns===0)B.critBuff=0;}
-
   await enemyTurn();
 }
 
 async function enemyTurn(){
   if(!B||B.over)return;
-  const e=B.enemy;
-  const p=playerStats();
-  const pDef=p.def*(1+B.defBuff);
-
-  B.bossTurn++;
-  const useBossSkill=e.isBoss&&B.bossTurn%3===0;
-
+  const e=B.enemy;const p=playerStats();const pDef=p.def*(1+B.defBuff);
+  B.bossTurn++;const useBossSkill=e.isBoss&&B.bossTurn%3===0;
   if(useBossSkill){
-    const sk=pick(BOSS_SKILLS);
-    const eOpts={defFactor:0.05,spread:0.20,minMul:0.35};
-    const er=calcDmg(e.atk,0,sk.mul,10,eOpts);
-    S.hp-=er.dmg;
+    const sk=pick(BOSS_SKILLS);const eOpts={defFactor:0.05,spread:0.20,minMul:0.35};const er=calcDmg(e.atk,0,sk.mul,10,eOpts);S.hp-=er.dmg;
     B.log.push({t:'skill',m:'👑 '+e.name+' 释放「'+sk.n+'」！造成 '+fmt(er.dmg)+' 点伤害'});
     if(sk.effect==='bleed'){B.status.bleed=sk.turns;B.log.push({t:'sys',m:'🩸 你陷入了流血状态（'+sk.turns+'回合）'});}
     if(sk.effect==='burn'){B.status.burn=sk.turns;B.log.push({t:'sys',m:'🔥 你陷入了灼烧状态（'+sk.turns+'回合）'});}
@@ -524,40 +569,22 @@ async function enemyTurn(){
     render();await sleep(600);
   } else {
     const eOpts=e.isBoss?{defFactor:0.05,spread:0.20,minMul:0.35}:undefined;
-    const er=calcDmg(e.atk,pDef,1,e.isBoss?10:5,eOpts);
-    S.hp-=er.dmg;
-    B.log.push({t:'dmg',m:e.name+' 发起攻击，造成 '+fmt(er.dmg)+' 点伤害'+(er.crit?'（暴击）':'')});
-    render();await sleep(400);
+    const er=calcDmg(e.atk,pDef,1,e.isBoss?10:5,eOpts);S.hp-=er.dmg;
+    B.log.push({t:'dmg',m:e.name+' 发起攻击，造成 '+fmt(er.dmg)+' 点伤害'+(er.crit?'（暴击）':'')});render();await sleep(400);
   }
-
   if(S.hp<=0){await loseBattle();return;}
-
-  if(B.status.bleed>0){
-    const dmg=Math.round(e.atk*0.3);
-    S.hp-=dmg;B.status.bleed--;
-    B.log.push({t:'dmg',m:'🩸 流血造成 '+dmg+' 点伤害（剩余'+B.status.bleed+'回合）'});
-    if(S.hp<=0){await loseBattle();return;}
-  }
-  if(B.status.burn>0){
-    const dmg=Math.round(e.atk*0.4);
-    S.hp-=dmg;B.status.burn--;
-    B.log.push({t:'dmg',m:'🔥 灼烧造成 '+dmg+' 点伤害（剩余'+B.status.burn+'回合）'});
-    if(S.hp<=0){await loseBattle();return;}
-  }
+  if(B.status.bleed>0){const dmg=Math.round(e.atk*0.3);S.hp-=dmg;B.status.bleed--;B.log.push({t:'dmg',m:'🩸 流血造成 '+dmg+' 点伤害（剩余'+B.status.bleed+'回合）'});if(S.hp<=0){await loseBattle();return;}}
+  if(B.status.burn>0){const dmg=Math.round(e.atk*0.4);S.hp-=dmg;B.status.burn--;B.log.push({t:'dmg',m:'🔥 灼烧造成 '+dmg+' 点伤害（剩余'+B.status.burn+'回合）'});if(S.hp<=0){await loseBattle();return;}}
   if(B.status.freeze>0){B.log.push({t:'sys',m:'❄️ 冰冻中（剩余'+B.status.freeze+'回合）'});B.status.freeze--;}
   if(B.status.stun>0){B.log.push({t:'sys',m:'💫 眩晕中（剩余'+B.status.stun+'回合）'});B.status.stun--;}
-
-  B.busy=false;
-  save();render();
+  B.busy=false;save();render();
 }
 
 function usePotion(type){
   if(!B||B.over||B.busy)return;
   if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0};
-  const qty=S.potions[type]||0;
-  if(qty<=0){notify('药水不足');return;}
-  const p=playerStats();
-  S.potions[type]--;
+  const qty=S.potions[type]||0;if(qty<=0){notify('药水不足');return;}
+  const p=playerStats();S.potions[type]--;
   if(type==='hp'){const heal=Math.round(p.hp*0.3);S.hp=Math.min(p.hp,S.hp+heal);B.log.push({t:'heal',m:'🩸 使用生命药水，恢复 '+heal+' 生命'});}
   else if(type==='hpBig'){const heal=Math.round(p.hp*0.6);S.hp=Math.min(p.hp,S.hp+heal);B.log.push({t:'heal',m:'💗 使用高级生命药水，恢复 '+heal+' 生命'});}
   else if(type==='mp'){const heal=Math.round(p.mp*0.5);S.mp=Math.min(p.mp,S.mp+heal);B.log.push({t:'heal',m:'💠 使用斗气药水，恢复 '+heal+' 斗气'});}
@@ -566,73 +593,44 @@ function usePotion(type){
 }
 
 async function winBattle(){
-  B.over=true;
-  const e=B.enemy,p=playerStats();
+  B.over=true;const e=B.enemy,p=playerStats();
   let exp=enemyExp(e);if(S.mode==='single')exp=Math.round(exp*1.2);
   let gold=enemyGold(e);const gm=ORIGINS[S.origin].bonus.goldMul||1;gold=Math.round(gold*gm);
-  S.exp+=exp;S.gold+=gold;
-  B.reward.exp=exp;B.reward.gold=gold;
+  S.exp+=exp;S.gold+=gold;B.reward.exp=exp;B.reward.gold=gold;
   B.log.push({t:'win',m:'✦ 击败 '+e.name+'！获得 '+fmt(exp)+' 经验、'+fmt(gold)+' CC'});
   const dropCount=e.isBoss?rnd(2,3):(Math.random()<0.45?1:0);
-  for(let i=0;i<dropCount;i++){
-    if(S.inv.length>=40){B.log.push({t:'sys',m:'背包已满'});break;}
-    const it=genEquip(pick(SLOTS).id,e.lv,Math.min(8,Math.max(0,Math.floor(e.lv/18)+rnd(0,2))));
-    S.inv.push(it);B.reward.items.push(it);
-    B.log.push({t:'win',m:'📦 获得装备：'+it.name});
-  }
+  for(let i=0;i<dropCount;i++){if(S.inv.length>=40){B.log.push({t:'sys',m:'背包已满'});break;}const it=genEquip(pick(SLOTS).id,e.lv,Math.min(8,Math.max(0,Math.floor(e.lv/18)+rnd(0,2))));S.inv.push(it);B.reward.items.push(it);B.log.push({t:'win',m:'📦 获得装备：'+it.name});}
   if(e.isBoss&&Math.random()<0.5){S.shards=(S.shards||0)+1;B.reward.shards=1;B.log.push({t:'win',m:'✧ 获得「圣冠碎片」×1'});}
   S.kills++;checkTitles();levelUpCheck();
   if(S.crown){S.crown.days--;if(S.crown.days<=0){B.log.push({t:'sys',m:'⚠ 「'+S.crown.name+'」已失效'});S.crown=null;}}
-  S.day++;B.busy=false;save();render();
-  if(window.syncMyProfile)syncMyProfile();
+  S.day++;B.busy=false;save();render();if(window.syncMyProfile)syncMyProfile();
 }
 
 async function loseBattle(){
-  B.over=true;
-  B.log.push({t:'lose',m:'✝ 你倒下了…'});
-  S.deaths++;
-  let lost=[];
-  if(S.level>1){S.level--;S.exp=Math.floor(expNeed(S.level)*0.3);B.log.push({t:'lose',m:'等级下降至 Lv.'+S.level});}
-  const pool=S.inv.slice();
-  for(const k in S.equip)if(S.equip[k])pool.push({__eq:k,it:S.equip[k]});
+  B.over=true;B.log.push({t:'lose',m:'✝ 你倒下了…'});S.deaths++;
+  let lost=[];if(S.level>1){S.level--;S.exp=Math.floor(expNeed(S.level)*0.3);B.log.push({t:'lose',m:'等级下降至 Lv.'+S.level});}
+  const pool=S.inv.slice();for(const k in S.equip)if(S.equip[k])pool.push({__eq:k,it:S.equip[k]});
   const dropN=Math.min(pool.length,rnd(1,2));
-  for(let i=0;i<dropN;i++){
-    if(pool.length===0)break;
-    const idx=Math.floor(Math.random()*pool.length);const p=pool.splice(idx,1)[0];
-    if(p.__eq){lost.push(p.it.name);S.equip[p.__eq]=null;}
-    else{lost.push(p.name);const j=S.inv.indexOf(p);if(j>=0)S.inv.splice(j,1);}
-  }
+  for(let i=0;i<dropN;i++){if(pool.length===0)break;const idx=Math.floor(Math.random()*pool.length);const p=pool.splice(idx,1)[0];if(p.__eq){lost.push(p.it.name);S.equip[p.__eq]=null;}else{lost.push(p.name);const j=S.inv.indexOf(p);if(j>=0)S.inv.splice(j,1);}}
   if(lost.length)B.log.push({t:'lose',m:'💔 遗失了：'+lost.join('、')});
-  S.hp=1;S.mp=0;B.busy=false;save();render();
-  if(window.syncMyProfile)syncMyProfile();
+  S.hp=1;S.mp=0;B.busy=false;save();render();if(window.syncMyProfile)syncMyProfile();
 }
 
 function levelUpCheck(){
-  let leveled=false;
-  while(S.level<160&&S.exp>=expNeed(S.level)){S.exp-=expNeed(S.level);S.level++;leveled=true;}
-  if(leveled){
-    const p=playerStats();S.hp=p.hp;S.mp=p.mp;
-    B.log.push({t:'win',m:'▲ 升级！当前等级 Lv.'+S.level});
-    if(S.level>=30&&!S.adv)B.log.push({t:'sys',m:'✦ 你已达到30级，可进行职业进阶！'});
-    if(S.level>=60&&!S.sub)B.log.push({t:'sys',m:'✦ 你已达到60级，可选择副职业！'});
-    if(window.syncMyProfile)syncMyProfile();
-  }
+  let leveled=false;while(S.level<160&&S.exp>=expNeed(S.level)){S.exp-=expNeed(S.level);S.level++;leveled=true;}
+  if(leveled){const p=playerStats();S.hp=p.hp;S.mp=p.mp;B.log.push({t:'win',m:'▲ 升级！当前等级 Lv.'+S.level});if(S.level>=30&&!S.adv)B.log.push({t:'sys',m:'✦ 你已达到30级，可进行职业进阶！'});if(S.level>=60&&!S.sub)B.log.push({t:'sys',m:'✦ 你已达到60级，可选择副职业！'});if(window.syncMyProfile)syncMyProfile();}
 }
 
 function checkTitles(){
   const add=t=>{if(!S.titles.includes(t)){S.titles.push(t);if(B)B.log.push({t:'win',m:'🏆 获得称号：「'+t+'」'});else notify('获得称号：「'+t+'」');}};
-  if(S.level>=10)add('初出茅庐');if(S.level>=30)add('边境行者');if(S.level>=60)add('沙场老将');
-  if(S.level>=100)add('传说之人');if(S.level>=150)add('圣域守护者');if(S.kills>=100)add('弑神者');
+  if(S.level>=10)add('初出茅庐');if(S.level>=30)add('边境行者');if(S.level>=60)add('沙场老将');if(S.level>=100)add('传说之人');if(S.level>=150)add('圣域守护者');if(S.kills>=100)add('弑神者');
 }
 
 function flee(){
   if(!B||B.over||B.busy)return;
-  const p=playerStats();
-  const chance=clamp(0.4+(p.spd-B.enemy.spd)*0.02,0.15,0.9);
+  const p=playerStats();const chance=clamp(0.4+(p.spd-B.enemy.spd)*0.02,0.15,0.9);
   if(Math.random()<chance){B.log.push({t:'sys',m:'你成功脱离了战斗。'});B.over=true;B.busy=false;render();}
-  else{B.log.push({t:'sys',m:'逃跑失败！'});B.busy=true;render();
-    setTimeout(()=>{if(!B||B.over)return;const e=B.enemy;const eOpts=e.isBoss?{defFactor:0.05,spread:0.20,minMul:0.35}:undefined;const er=calcDmg(e.atk,p.def,1,e.isBoss?10:5,eOpts);S.hp-=er.dmg;B.log.push({t:'dmg',m:e.name+' 追击，造成 '+fmt(er.dmg)+' 点伤害'});if(S.hp<=0){loseBattle();}else{B.busy=false;render();}},500);
-  }
+  else{B.log.push({t:'sys',m:'逃跑失败！'});B.busy=true;render();setTimeout(()=>{if(!B||B.over)return;const e=B.enemy;const eOpts=e.isBoss?{defFactor:0.05,spread:0.20,minMul:0.35}:undefined;const er=calcDmg(e.atk,p.def,1,e.isBoss?10:5,eOpts);S.hp-=er.dmg;B.log.push({t:'dmg',m:e.name+' 追击，造成 '+fmt(er.dmg)+' 点伤害'});if(S.hp<=0){loseBattle();}else{B.busy=false;render();}},500);}
 }
 
 function explore(){
@@ -651,15 +649,7 @@ function bar(cur,max,cls){const pct=max>0?clamp(cur/max*100,0,100):0;return '<di
 async function syncMyProfile(){
   if(!socialReady()||!S)return;
   try{
-    const profile={
-      name:S.name,
-      level:S.level,
-      power:calcPower(),
-      cls:S.cls,
-      adv:S.adv||CLASSES[S.cls].name,
-      online:true,
-      updatedAt:FB.serverTimestamp()
-    };
+    const profile={ name:S.name, level:S.level, power:calcPower(), cls:S.cls, adv:S.adv||CLASSES[S.cls].name, online:true, updatedAt:FB.serverTimestamp() };
     await FB.set(FB.ref(FB.db,'users/'+MY_UID),profile);
     await FB.set(FB.ref(FB.db,'leaderboard/'+MY_UID),profile);
     social.online=true;
@@ -671,46 +661,32 @@ function startSocialListeners(){
   if(!socialReady()||social.listenersStarted)return;
   social.listenersStarted=true;
 
-  FB.onValue(FB.ref(FB.db,'friendRequests/'+MY_UID),snap=>{
-    social.requests=[];
-    snap.forEach(c=>social.requests.push({uid:c.key,...c.val()}));
-    if(UI.tab==='social'&&!B)render();
-  });
-
-  FB.onValue(FB.ref(FB.db,'friends/'+MY_UID),async snap=>{
-    const uids=[];
-    snap.forEach(c=>uids.push(c.key));
-    const list=[];
-    for(const uid of uids){
-      try{
-        const s=await FB.get(FB.ref(FB.db,'users/'+uid));
-        if(s.exists())list.push({uid,...s.val()});
-        else list.push({uid,name:'（未知玩家）',level:0,power:0,online:false});
-      }catch(e){}
-    }
-    social.friends=list;
-    if(UI.tab==='social'&&!B)render();
-  });
+  FB.onValue(FB.ref(FB.db,'friendRequests/'+MY_UID),snap=>{social.requests=[];snap.forEach(c=>social.requests.push({uid:c.key,...c.val()}));if(UI.tab==='social'&&!B)render();});
+  FB.onValue(FB.ref(FB.db,'friends/'+MY_UID),async snap=>{const uids=[];snap.forEach(c=>uids.push(c.key));const list=[];for(const uid of uids){try{const s=await FB.get(FB.ref(FB.db,'users/'+uid));if(s.exists())list.push({uid,...s.val()});else list.push({uid,name:'（未知玩家）',level:0,power:0,online:false});}catch(e){}}social.friends=list;if(UI.tab==='social'&&!B)render();});
 
   const q=FB.query(FB.ref(FB.db,'leaderboard'),FB.orderByChild('power'),FB.limitToLast(50));
-  FB.onValue(q,snap=>{
-    social.leaderboard=[];
-    snap.forEach(c=>social.leaderboard.push({uid:c.key,...c.val()}));
-    social.leaderboard.reverse();
-    if(UI.tab==='social'&&!B)render();
-  });
+  FB.onValue(q,snap=>{social.leaderboard=[];snap.forEach(c=>social.leaderboard.push({uid:c.key,...c.val()}));social.leaderboard.reverse();if(UI.tab==='social'&&!B)render();});
 
-  syncMyProfile();
+  FB.onValue(FB.ref(FB.db,'guilds'),snap=>{social.allGuilds=[];snap.forEach(c=>social.allGuilds.push({id:c.key,...c.val()}));if(UI.tab==='guild'&&!B)render();});
+
+  listenMyGuild();syncMyProfile();
 }
 
-// 轮询等待 Firebase 就绪
+function listenMyGuild(){
+  if(social.guildListenerRef && window.FB) { FB.off(social.guildListenerRef); social.guildListenerRef = null; }
+  social.myGuildData = null;
+  if(!S.guildId || !socialReady())return;
+  social.guildListenerRef = FB.ref(FB.db, 'guilds/' + S.guildId);
+  FB.onValue(social.guildListenerRef, snap => {
+    if(snap.exists()){ social.myGuildData = snap.val(); }
+    else { S.guildId = null; social.myGuildData = null; save(); }
+    if(UI.tab==='guild'&&!B)render();
+  });
+}
+
 function waitForFirebase(attempt){
   attempt=attempt||0;
-  if(socialReady()){
-    startSocialListeners();
-    if(UI.tab==='social'&&!B)render();
-    return;
-  }
+  if(socialReady()){ startSocialListeners(); if(UI.tab==='social'||UI.tab==='guild'){ if(!B) render(); } return; }
   if(attempt>40)return;
   setTimeout(()=>waitForFirebase(attempt+1),500);
 }
@@ -718,22 +694,12 @@ function waitForFirebase(attempt){
 async function sendFriendRequest(targetUid){
   if(!socialReady()){notify('未连接服务器');return;}
   if(!targetUid||targetUid===MY_UID){notify('请输入有效的 UID');return;}
-  try{
-    const s=await FB.get(FB.ref(FB.db,'users/'+targetUid));
-    if(!s.exists()){notify('该 UID 不存在');return;}
-    await FB.set(FB.ref(FB.db,'friendRequests/'+targetUid+'/'+MY_UID),{name:S.name,at:Date.now()});
-    notify('好友请求已发送');
-  }catch(e){notify('发送失败：'+e.message);}
+  try{ const s=await FB.get(FB.ref(FB.db,'users/'+targetUid)); if(!s.exists()){notify('该 UID 不存在');return;} await FB.set(FB.ref(FB.db,'friendRequests/'+targetUid+'/'+MY_UID),{name:S.name,at:Date.now()}); notify('好友请求已发送'); }catch(e){notify('发送失败：'+e.message);}
 }
 
 async function acceptFriend(fromUid){
   if(!socialReady())return;
-  try{
-    await FB.set(FB.ref(FB.db,'friends/'+MY_UID+'/'+fromUid),true);
-    await FB.set(FB.ref(FB.db,'friends/'+fromUid+'/'+MY_UID),true);
-    await FB.remove(FB.ref(FB.db,'friendRequests/'+MY_UID+'/'+fromUid));
-    notify('已添加好友');
-  }catch(e){notify('操作失败');}
+  try{ await FB.set(FB.ref(FB.db,'friends/'+MY_UID+'/'+fromUid),true); await FB.set(FB.ref(FB.db,'friends/'+fromUid+'/'+MY_UID),true); await FB.remove(FB.ref(FB.db,'friendRequests/'+MY_UID+'/'+fromUid)); notify('已添加好友'); }catch(e){notify('操作失败');}
 }
 
 function chatRoomId(a,b){return [a,b].sort().join('_');}
@@ -741,118 +707,73 @@ function chatRoomId(a,b){return [a,b].sort().join('_');}
 function openChat(friendUid){
   if(!socialReady())return;
   if(social.chatUnsub){social.chatUnsub();social.chatUnsub=null;}
-  social.chatFriend=friendUid;
-  social.chatMessages=[];
+  social.chatFriend=friendUid; social.chatMessages=[];
   const room=chatRoomId(MY_UID,friendUid);
-  const unsub=FB.onValue(FB.ref(FB.db,'chats/'+room),snap=>{
-    const msgs=[];
-    snap.forEach(c=>msgs.push(c.val()));
-    msgs.sort((a,b)=>a.at-b.at);
-    social.chatMessages=msgs;
-    if(UI.tab==='social'&&!B)render();
-    setTimeout(()=>{const el=document.getElementById('chatBox');if(el)el.scrollTop=el.scrollHeight;},50);
-  });
+  const unsub=FB.onValue(FB.ref(FB.db,'chats/'+room),snap=>{ const msgs=[]; snap.forEach(c=>msgs.push(c.val())); msgs.sort((a,b)=>a.at-b.at); social.chatMessages=msgs; if(UI.tab==='social'&&!B)render(); setTimeout(()=>{const el=document.getElementById('chatBox');if(el)el.scrollTop=el.scrollHeight;},50); });
   social.chatUnsub=()=>unsub();
 }
 
 async function sendChatMessage(text){
   if(!text||!text.trim()||!social.chatFriend)return;
   const room=chatRoomId(MY_UID,social.chatFriend);
-  try{
-    await FB.push(FB.ref(FB.db,'chats/'+room),{from:MY_UID,text:text.trim(),at:Date.now()});
-  }catch(e){notify('发送失败');}
+  try{ await FB.push(FB.ref(FB.db,'chats/'+room),{from:MY_UID,text:text.trim(),at:Date.now()}); }catch(e){notify('发送失败');}
 }
 
-// ================= 社交页面 =================
-function renderSocial(){
-  if(!socialReady()){
-    return `<div class="card center">
-      <div class="small">正在连接服务器…</div>
-      <div class="small" style="margin-top:8px">若长时间无响应，请检查 Firebase 配置及是否已启用匿名登录。</div>
-    </div>`;
-  }
-
-  const myPower=calcPower();
-  const onlineCount=social.friends.filter(f=>f.online).length;
-  const chatFriendData=social.chatFriend?social.friends.find(f=>f.uid===social.chatFriend):null;
-
-  return `
-  <div class="card">
-    <div class="row"><span class="k">我的名字</span><span class="v">${S.name}</span></div>
-    <div class="row"><span class="k">等级 / 战力</span><span class="v">Lv.${S.level} · ${fmt(myPower)}</span></div>
-    <div class="row"><span class="k">在线好友</span><span class="v">${onlineCount} / ${social.friends.length}</span></div>
-    <div style="margin-top:8px">
-      <div class="small" style="margin-bottom:4px">我的 UID（发给朋友添加你）</div>
-      <div style="display:flex;gap:6px">
-        <input id="myUidBox" value="${MY_UID}" readonly style="font-size:11px;font-family:monospace">
-        <button onclick="navigator.clipboard.writeText('${MY_UID}');notify('已复制 UID')" style="padding:8px 12px;white-space:nowrap">复制</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h3 style="margin-bottom:8px">添加好友</h3>
-    <div style="display:flex;gap:6px">
-      <input id="friendUidInput" placeholder="粘贴对方 UID…" style="font-size:12px">
-      <button onclick="sendFriendRequest(document.getElementById('friendUidInput').value.trim())" style="padding:8px 12px;white-space:nowrap">发送请求</button>
-    </div>
-  </div>
-
-  ${social.requests.length?`
-  <div class="card">
-    <h3 style="margin-bottom:8px">待处理请求（${social.requests.length}）</h3>
-    ${social.requests.map(r=>`
-      <div class="item">
-        <span class="iname"><span class="hl">${r.name||r.uid.slice(0,8)}</span> <span class="small">请求加你为好友</span></span>
-        <button onclick="acceptFriend('${r.uid}')" style="padding:4px 10px;font-size:11px">接受</button>
-      </div>`).join('')}
-  </div>`:''}
-
-  <div class="card">
-    <h3 style="margin-bottom:8px">好友列表（${social.friends.length}）</h3>
-    ${social.friends.length?social.friends.map(f=>`
-      <div class="item">
-        <span class="dot" style="background:${f.online?'#4a7c59':'#5a3a3a'}"></span>
-        <span class="iname">
-          <span class="hl">${f.name}</span>
-          <span class="small">Lv.${f.level} · 战力 ${fmt(f.power||0)} · ${f.adv||''}</span>
-        </span>
-        <button onclick="openChat('${f.uid}')" style="padding:4px 10px;font-size:11px">聊天</button>
-      </div>`).join(''):'<div class="small">还没有好友，把你的 UID 发给朋友吧。</div>'}
-  </div>
-
-  ${social.chatFriend?`
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <h3>💬 ${chatFriendData?chatFriendData.name:'好友'}</h3>
-      <button onclick="social.chatFriend=null;social.chatMessages=[];if(social.chatUnsub){social.chatUnsub();social.chatUnsub=null;}render()" style="padding:4px 10px;font-size:11px">关闭</button>
-    </div>
-    <div id="chatBox" class="chat-box">
-      ${social.chatMessages.length?social.chatMessages.map(m=>`
-        <div class="chat-msg ${m.from===MY_UID?'me':'other'}">
-          <span class="chat-bubble">${escapeHtml(m.text)}</span>
-        </div>`).join(''):'<div class="small">还没有消息</div>'}
-    </div>
-    <div style="display:flex;gap:6px">
-      <input id="chatInput" placeholder="输入消息…" style="font-size:12px" onkeydown="if(event.key==='Enter'){sendChatMessage(this.value);this.value=''}">
-      <button onclick="const i=document.getElementById('chatInput');sendChatMessage(i.value);i.value=''" style="padding:8px 12px;white-space:nowrap">发送</button>
-    </div>
-  </div>`:''}
-
-  <div class="card">
-    <h3 style="margin-bottom:8px">🏆 全服排行榜 Top 50</h3>
-    ${social.leaderboard.length?social.leaderboard.map((u,i)=>{
-      const isMe=u.uid===MY_UID;
-      return `<div class="row">
-        <span class="k" style="${i<3?'color:#ffd700':''}">${i+1}. ${isMe?'<span class="hl">'+escapeHtml(u.name)+'（你）</span>':escapeHtml(u.name)}</span>
-        <span class="v small">Lv.${u.level} · 战力 ${fmt(u.power||0)}</span>
-      </div>`;
-    }).join(''):'<div class="small">暂无数据</div>'}
-  </div>`;
+// ================= 公会系统逻辑 =================
+async function createGuild(name){
+  if(!socialReady()||!S)return;
+  name = name.trim();
+  if(name.length<2 || name.length>10) { notify('公会名需在 2-10 字之间'); return; }
+  if(S.gold < CREATE_GUILD_COST) { notify('金币不足'); return; }
+  const exists = social.allGuilds.some(g => g.name === name);
+  if(exists) { notify('该公会名已被占用'); return; }
+  try {
+    const gid = 'g_' + Date.now().toString(36) + Math.floor(Math.random()*1000);
+    const newGuild = { name: name, leaderUid: MY_UID, leaderName: S.name, level: 1, exp: 0, members: { [MY_UID]: { name: S.name, role: '会长', contrib: 0, joinedAt: Date.now() } }, createdAt: Date.now() };
+    S.gold -= CREATE_GUILD_COST; await FB.set(FB.ref(FB.db, 'guilds/' + gid), newGuild); S.guildId = gid; save(); listenMyGuild(); render(); notify('成功创建公会：' + name); if(window.syncMyProfile) syncMyProfile();
+  } catch(e) { notify('创建失败'); }
 }
 
-function escapeHtml(s){
-  return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function joinGuild(gid){
+  if(!socialReady()||!S)return;
+  if(S.guildId) { notify('请先退出当前公会'); return; }
+  try {
+    const snap = await FB.get(FB.ref(FB.db, 'guilds/' + gid));
+    if(!snap.exists()) { notify('公会不存在'); return; }
+    await FB.update(FB.ref(FB.db, 'guilds/' + gid + '/members/' + MY_UID), { name: S.name, role: '成员', contrib: 0, joinedAt: Date.now() });
+    S.guildId = gid; save(); listenMyGuild(); render(); notify('已加入公会');
+  } catch(e) { notify('加入失败'); }
+}
+
+async function leaveGuild(){
+  if(!socialReady()||!S.guildId)return;
+  if(!confirm('确定要退出公会吗？贡献和加成将会消失。'))return;
+  try {
+    const snap = await FB.get(FB.ref(FB.db, 'guilds/' + S.guildId));
+    if(snap.exists()) {
+      const gd = snap.val(); const members = gd.members || {}; const memberCount = Object.keys(members).length;
+      if(gd.leaderUid === MY_UID && memberCount <= 1) { await FB.remove(FB.ref(FB.db, 'guilds/' + S.guildId)); }
+      else {
+        if(gd.leaderUid === MY_UID) { const nextUid = Object.keys(members).find(u => u !== MY_UID); await FB.update(FB.ref(FB.db, 'guilds/' + S.guildId), { leaderUid: nextUid, leaderName: members[nextUid].name }); await FB.update(FB.ref(FB.db, 'guilds/' + S.guildId + '/members/' + nextUid), { role: '会长' }); }
+        await FB.remove(FB.ref(FB.db, 'guilds/' + S.guildId + '/members/' + MY_UID));
+      }
+    }
+    S.guildId = null; social.myGuildData = null; if(social.guildListenerRef) { FB.off(social.guildListenerRef); social.guildListenerRef = null; } save(); render(); notify('已退出公会');
+  } catch(e) { notify('退出失败'); }
+}
+
+async function donateGuild(amount) {
+  if(!socialReady()||!S.guildId||!social.myGuildData)return;
+  if(S.gold < amount) { notify('金币不足'); return; }
+  try {
+    S.gold -= amount; const expGain = amount; let newExp = (social.myGuildData.exp || 0) + expGain; let newLvl = social.myGuildData.level || 1;
+    let nextNeed = newLvl * 2000;
+    while(newExp >= nextNeed && newLvl < 10) { newExp -= nextNeed; newLvl++; nextNeed = newLvl * 2000; }
+    await FB.update(FB.ref(FB.db, 'guilds/' + S.guildId), { exp: newExp, level: newLvl });
+    const memberRef = FB.ref(FB.db, `guilds/${S.guildId}/members/${MY_UID}/contrib`);
+    const snap = await FB.get(memberRef); const curContrib = snap.val() || 0;
+    await FB.set(memberRef, curContrib + amount); save(); render(); notify(`捐献成功！公会获得 ${expGain} 经验`); if(window.syncMyProfile) syncMyProfile();
+  } catch(e) { notify('捐献失败'); }
 }
 
 // ================= 页面渲染 =================
@@ -861,15 +782,14 @@ function renderTitle(){
     <h1>圣 冠</h1>
     <div class="subtitle">H O L Y &nbsp; C R O W N</div>
     <div class="card" style="max-width:620px;margin:0 auto 20px;text-align:left">
-      <p style="color:#8a7a60;font-size:13px;line-height:1.9">
-        暗鸦掠过铁荆棘王旗，黄庭星轨在天穹断裂。<br>
-        深渊传来旧神低语，青金石瞳孔映出三日月缺。<br>
-        <span style="color:var(--gold)">—— 血与铁构成十二圣冠，为新王奉献皇冕。</span>
-      </p>
+      <p style="color:#8a7a60;font-size:13px;line-height:1.9">暗鸦掠过铁荆棘王旗，黄庭星轨在天穹断裂。<br>深渊传来旧神低语，青金石瞳孔映出三日月缺。<br><span style="color:var(--gold)">—— 血与铁构成十二圣冠，为新王奉献皇冕。</span></p>
     </div>
     <div class="flex" style="max-width:420px;margin:0 auto">
       <button data-act="newgame" style="font-size:16px;padding:14px">开 始 冒 险</button>
       <button data-act="loadgame" style="font-size:16px;padding:14px">读 取 存 档</button>
+    </div>
+    <div class="center" style="margin-top:20px">
+      <button data-act="showAuth" style="font-size:12px;background:none;border-color:transparent;color:var(--gold)">绑定邮箱账号（跨设备同步）</button>
     </div>
   </div>`;
 }
@@ -908,14 +828,16 @@ function renderCreate(){
 function renderMain(){
   const p=playerStats();const need=expNeed(S.level);const expPct=S.level>=160?100:clamp(S.exp/need*100,0,100);
   const socialTag=socialReady()?`<span class="tag on">🌐 已连接</span>`:`<span class="tag off">⏳ 连接中</span>`;
+  const accountTag = window.MY_IS_ANON ? `<span class="tag off" data-act="showAuth" style="cursor:pointer">👤 游客(点此绑定)</span>` : `<span class="tag on" data-act="logout" style="cursor:pointer">👤 ${window.MY_EMAIL}</span>`;
+  
   return `
   <div class="topbar">
     <span class="pname">${S.name}</span>
     <span class="tag">Lv.${S.level}</span>
     <span class="tag">${CLASSES[S.cls].icon} ${S.adv||CLASSES[S.cls].name}</span>
     <span class="tag">💰 ${fmt(S.gold)} CC</span>
-    <span class="tag">📅 第${S.day}天</span>
     ${socialTag}
+    ${accountTag}
     ${S.crown?`<span class="tag" style="border-color:#fde047;color:#fde047">👑 ${S.crown.days}天</span>`:''}
   </div>
   <div class="card" style="padding:10px 14px">
@@ -932,7 +854,7 @@ function renderMain(){
     ${[['explore','探索'],['char','角色'],['inv','背包'],['dungeon','副本'],['crown','圣冠'],['guild','公会'],['shop','商店'],['social','社交']].map(([k,n])=>`<button class="${UI.tab===k?'active':''}" data-act="tab" data-arg="${k}">${n}</button>`).join('')}
   </div>
   <div class="card">${renderView(p)}</div>
-  <div class="center" style="margin:14px 0"><button data-act="reset" style="font-size:11px;opacity:.5">删除存档重新开始</button></div>`;
+  <div class="center" style="margin:14px 0"><button data-act="reset" style="font-size:11px;opacity:.5">删除本地存档</button></div>`;
 }
 
 function renderView(p){
@@ -949,194 +871,76 @@ function renderView(p){
   }
 }
 
-function renderExplore(){
-  const reg=REGIONS[UI.region];
-  return `<h3 style="margin-bottom:10px">${reg.icon} ${reg.name} <span class="small">（推荐 ${reg.min}-${reg.max}）</span></h3>
-  <p class="small" style="margin-bottom:10px">${reg.desc}</p>
-  <button data-act="explore" style="width:100%;padding:14px;font-size:15px;margin-bottom:12px">⚔ 探 索</button>
-  <div class="small" style="margin-bottom:6px">切换区域</div>
-  <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr))">
-    ${REGIONS.map((r,i)=>`<div class="cls-card ${UI.region===i?'sel':''}" data-act="region" data-arg="${i}" style="padding:8px"><span class="ic" style="font-size:20px">${r.icon}</span><div class="nm" style="font-size:12px">${r.name}</div><div class="ds">Lv.${r.min}-${r.max}</div></div>`).join('')}
-  </div>
-  <div style="margin-top:14px">
-    <div class="row"><span class="k">击杀</span><span class="v">${S.kills}</span></div>
-    <div class="row"><span class="k">死亡</span><span class="v">${S.deaths}</span></div>
-    <div class="row"><span class="k">圣冠碎片</span><span class="v">${S.shards||0}</span></div>
-  </div>`;
-}
+function renderExplore(){const reg=REGIONS[UI.region];return `<h3 style="margin-bottom:10px">${reg.icon} ${reg.name} <span class="small">（推荐 ${reg.min}-${reg.max}）</span></h3><p class="small" style="margin-bottom:10px">${reg.desc}</p><button data-act="explore" style="width:100%;padding:14px;font-size:15px;margin-bottom:12px">⚔ 探 索</button><div class="small" style="margin-bottom:6px">切换区域</div><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr))">${REGIONS.map((r,i)=>`<div class="cls-card ${UI.region===i?'sel':''}" data-act="region" data-arg="${i}" style="padding:8px"><span class="ic" style="font-size:20px">${r.icon}</span><div class="nm" style="font-size:12px">${r.name}</div><div class="ds">Lv.${r.min}-${r.max}</div></div>`).join('')}</div><div style="margin-top:14px"><div class="row"><span class="k">击杀</span><span class="v">${S.kills}</span></div><div class="row"><span class="k">死亡</span><span class="v">${S.deaths}</span></div><div class="row"><span class="k">圣冠碎片</span><span class="v">${S.shards||0}</span></div></div>`;}
 
 function renderChar(p){
   const c=CLASSES[S.cls];const canAdv=S.level>=30&&!S.adv;const canSub=S.level>=60&&!S.sub;
-  return `<h3 style="margin-bottom:10px">${c.icon} ${S.name}</h3>
-  <div class="row"><span class="k">主职业</span><span class="v">${c.name}${S.adv?' → '+S.adv:''}</span></div>
-  <div class="row"><span class="k">副职业</span><span class="v">${S.sub?CLASSES[S.sub].name:'未选择'}</span></div>
-  <div class="row"><span class="k">出身</span><span class="v">${ORIGINS[S.origin].name}</span></div>
-  <div class="row"><span class="k">等级</span><span class="v">Lv.${S.level}/160</span></div>
-  <div class="row"><span class="k">战力</span><span class="v">${fmt(calcPower())}</span></div>
-  <hr style="border:none;border-top:1px solid var(--line);margin:10px 0">
-  <div class="row"><span class="k">生命</span><span class="v">${fmt(p.hp)}</span></div>
-  <div class="row"><span class="k">斗气</span><span class="v">${fmt(p.mp)}</span></div>
-  <div class="row"><span class="k">攻击</span><span class="v">${fmt(p.atk)}</span></div>
-  <div class="row"><span class="k">防御</span><span class="v">${fmt(p.def)}</span></div>
-  <div class="row"><span class="k">速度</span><span class="v">${fmt(p.spd)}</span></div>
-  <div class="row"><span class="k">暴击</span><span class="v">${Math.round(p.crit)}%</span></div>
-  <hr style="border:none;border-top:1px solid var(--line);margin:10px 0">
-  <h3 style="margin-bottom:8px;font-size:14px">技能</h3>
-  ${getSkills().map(s=>`<div class="row"><span class="k">${s.n}</span><span class="v small" style="color:#8a7a60">${s.d}${s.mp?'（'+s.mp+'）':''}</span></div>`).join('')}
-  ${canAdv?`<hr style="border:none;border-top:1px solid var(--gold);margin:14px 0">
-  <h3 style="margin-bottom:8px;color:#f0d79a">✦ 职业进阶（30级）</h3>
-  <div class="grid" style="grid-template-columns:1fr 1fr">
-    ${c.adv.map(a=>`<div class="cls-card" data-act="adv" data-arg="${a.n}"><div class="nm">${a.n}</div><div class="ds">${a.skill.n}</div></div>`).join('')}
-  </div>`:''}
-  ${canSub?`<hr style="border:none;border-top:1px solid var(--gold);margin:14px 0">
-  <h3 style="margin-bottom:8px;color:#f0d79a">✦ 副职业（60级）</h3>
-  <div class="grid">
-    ${Object.values(CLASSES).filter(x=>x.key!==S.cls).map(x=>`<div class="cls-card" data-act="sub" data-arg="${x.key}"><span class="ic">${x.icon}</span><div class="nm">${x.name}</div><div class="ds">${x.skills[0].n}</div></div>`).join('')}
-  </div>`:''}
-  <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
-  <h3 style="margin-bottom:8px;font-size:14px">称号（${S.titles.length}/${TITLES.length}）</h3>
-  ${S.titles.length?S.titles.map(t=>{const td=TITLES.find(x=>x.name===t);return `<div class="row"><span class="k">🏆 ${t}</span><span class="v small">${td?Object.entries(td.b).map(([k,v])=>k+' +'+v).join(' '):''}</span></div>`;}).join(''):'<div class="small">尚无称号</div>'}`;
+  return `<h3 style="margin-bottom:10px">${c.icon} ${S.name}</h3><div class="row"><span class="k">主职业</span><span class="v">${c.name}${S.adv?' → '+S.adv:''}</span></div><div class="row"><span class="k">副职业</span><span class="v">${S.sub?CLASSES[S.sub].name:'未选择'}</span></div><div class="row"><span class="k">等级</span><span class="v">Lv.${S.level}/160</span></div><div class="row"><span class="k">战力</span><span class="v">${fmt(calcPower())}</span></div><hr style="border:none;border-top:1px solid var(--line);margin:10px 0"><div class="row"><span class="k">生命</span><span class="v">${fmt(p.hp)}</span></div><div class="row"><span class="k">斗气</span><span class="v">${fmt(p.mp)}</span></div><div class="row"><span class="k">攻击</span><span class="v">${fmt(p.atk)}</span></div><div class="row"><span class="k">防御</span><span class="v">${fmt(p.def)}</span></div><div class="row"><span class="k">速度</span><span class="v">${fmt(p.spd)}</span></div><div class="row"><span class="k">暴击</span><span class="v">${Math.round(p.crit)}%</span></div><hr style="border:none;border-top:1px solid var(--line);margin:10px 0"><h3 style="margin-bottom:8px;font-size:14px">技能</h3>${getSkills().map(s=>`<div class="row"><span class="k">${s.n}</span><span class="v small" style="color:#8a7a60">${s.d}${s.mp?'（'+s.mp+'）':''}</span></div>`).join('')}
+  ${canAdv?`<hr style="border:none;border-top:1px solid var(--gold);margin:14px 0"><h3 style="margin-bottom:8px;color:#f0d79a">✦ 职业进阶（30级）</h3><div class="grid" style="grid-template-columns:1fr 1fr">${c.adv.map(a=>`<div class="cls-card" data-act="adv" data-arg="${a.n}"><div class="nm">${a.n}</div><div class="ds">${a.skill.n}</div></div>`).join('')}</div>`:''}
+  ${canSub?`<hr style="border:none;border-top:1px solid var(--gold);margin:14px 0"><h3 style="margin-bottom:8px;color:#f0d79a">✦ 副职业（60级）</h3><div class="grid">${Object.values(CLASSES).filter(x=>x.key!==S.cls).map(x=>`<div class="cls-card" data-act="sub" data-arg="${x.key}"><span class="ic">${x.icon}</span><div class="nm">${x.name}</div><div class="ds">${x.skills[0].n}</div></div>`).join('')}</div>`:''}
+  <hr style="border:none;border-top:1px solid var(--line);margin:14px 0"><h3 style="margin-bottom:8px;font-size:14px">称号（${S.titles.length}/${TITLES.length}）</h3>${S.titles.length?S.titles.map(t=>{const td=TITLES.find(x=>x.name===t);return `<div class="row"><span class="k">🏆 ${t}</span><span class="v small">${td?Object.entries(td.b).map(([k,v])=>k+' +'+v).join(' '):''}</span></div>`;}).join(''):'<div class="small">尚无称号</div>'}`;
 }
 
 function renderInv(p){
-  return `<h3 style="margin-bottom:10px">🎒 背包（${S.inv.length}/40）</h3>
-  <h4 style="font-size:13px;color:#8a7a60;margin:8px 0">已装备</h4>
-  ${SLOTS.map(s=>{const it=S.equip[s.id];return `<div class="item"><span style="width:26px">${s.icon}</span><span class="iname">${it?`<span class="rar${it.rar}">${it.name}</span> <span class="small">Lv.${it.lvl}</span>${it.slot==='weapon'?' <span class="small">（'+reqLabel(it)+'）</span>':''}<br><span class="small">${statLine(it)}</span>`:'<span class="small">— 空 —</span>'}</span>${it?`<button data-act="unequip" data-arg="${s.id}" style="padding:3px 8px;font-size:11px">卸下</button>`:''}</div>`;}).join('')}
-  <h4 style="font-size:13px;color:#8a7a60;margin:14px 0 8px">物品 <span class="small">▲提升 ▼下降</span></h4>
-  ${S.inv.length?S.inv.map((it,i)=>{
-    const cur=S.equip[it.slot];
-    const better=!cur||equipScore(it)>equipScore(cur);
-    const ok=it.slot==='weapon'?canEquip(it):true;
-    return `<div class="item" style="flex-wrap:wrap">
-      <span style="width:26px">${SLOTS.find(s=>s.id===it.slot).icon}</span>
-      <span class="iname" style="flex:1 1 200px">
-        <span class="rar${it.rar}">${it.name}</span>
-        <span class="small"> Lv.${it.lvl} · ${RAR[it.rar].n}</span>
-        ${better?'<span style="color:#7fd4a0;font-weight:bold"> ↑推荐</span>':''}
-        ${it.slot==='weapon'?`<span class="small ${ok?'ok':'danger'}">（${reqLabel(it)}${ok?'':'·职业不符'}）</span>`:''}
-        <br><span class="small">${statCompare(it)}</span>
-      </span>
-      <span style="display:flex;gap:4px">
-        <button data-act="equip" data-arg="${i}" ${ok?'':'disabled'} style="padding:3px 8px;font-size:11px">装备</button>
-        <button data-act="sell" data-arg="${i}" style="padding:3px 8px;font-size:11px">出售</button>
-      </span>
-    </div>`;
-  }).join(''):'<div class="small">空空如也</div>'}`;
+  return `<h3 style="margin-bottom:10px">🎒 背包（${S.inv.length}/40）</h3><h4 style="font-size:13px;color:#8a7a60;margin:8px 0">已装备</h4>${SLOTS.map(s=>{const it=S.equip[s.id];return `<div class="item"><span style="width:26px">${s.icon}</span><span class="iname">${it?`<span class="rar${it.rar}">${it.name}</span> <span class="small">Lv.${it.lvl}</span>${it.slot==='weapon'?' <span class="small">（'+reqLabel(it)+'）</span>':''}<br><span class="small">${statLine(it)}</span>`:'<span class="small">— 空 —</span>'}</span>${it?`<button data-act="unequip" data-arg="${s.id}" style="padding:3px 8px;font-size:11px">卸下</button>`:''}</div>`;}).join('')}<h4 style="font-size:13px;color:#8a7a60;margin:14px 0 8px">物品 <span class="small">▲提升 ▼下降</span></h4>${S.inv.length?S.inv.map((it,i)=>{const cur=S.equip[it.slot];const better=!cur||equipScore(it)>equipScore(cur);const ok=it.slot==='weapon'?canEquip(it):true;return `<div class="item" style="flex-wrap:wrap"><span style="width:26px">${SLOTS.find(s=>s.id===it.slot).icon}</span><span class="iname" style="flex:1 1 200px"><span class="rar${it.rar}">${it.name}</span><span class="small"> Lv.${it.lvl} · ${RAR[it.rar].n}</span>${better?'<span style="color:#7fd4a0;font-weight:bold"> ↑推荐</span>':''}${it.slot==='weapon'?`<span class="small ${ok?'ok':'danger'}">（${reqLabel(it)}${ok?'':'·职业不符'}）</span>`:''}<br><span class="small">${statCompare(it)}</span></span><span style="display:flex;gap:4px"><button data-act="equip" data-arg="${i}" ${ok?'':'disabled'} style="padding:3px 8px;font-size:11px">装备</button><button data-act="sell" data-arg="${i}" style="padding:3px 8px;font-size:11px">出售</button></span></div>`;}).join(''):'<div class="small">空空如也</div>'}`;
 }
 
 function renderDungeon(){
-  return `<h3 style="margin-bottom:10px">🏛 副本</h3>
-  <p class="small" style="margin-bottom:12px"><span class="danger">⚠ Boss每3回合释放技能，会施加流血/灼烧/冰冻/眩晕等状态，请备好药水。</span></p>
-  ${DUNGEONS.map((d,i)=>{const locked=S.level<Math.max(1,d.lv-5);return `<div class="item" style="padding:10px"><span style="font-size:20px">${d.icon}</span><span class="iname"><span style="color:var(--gold2)">${d.name}</span> <span class="small">（Lv.${d.lv}）</span><br><span class="small">${d.desc}</span></span><button data-act="dungeon" data-arg="${i}" ${locked?'disabled':''} style="padding:6px 12px">${locked?'等级不足':'进入'}</button></div>`;}).join('')}`;
+  return `<h3 style="margin-bottom:10px">🏛 副本</h3><p class="small" style="margin-bottom:12px"><span class="danger">⚠ Boss每3回合释放技能，会施加流血/灼烧/冰冻/眩晕等状态，请备好药水。</span></p>${DUNGEONS.map((d,i)=>{const locked=S.level<Math.max(1,d.lv-5);return `<div class="item" style="padding:10px"><span style="font-size:20px">${d.icon}</span><span class="iname"><span style="color:var(--gold2)">${d.name}</span> <span class="small">（Lv.${d.lv}）</span><br><span class="small">${d.desc}</span></span><button data-act="dungeon" data-arg="${i}" ${locked?'disabled':''} style="padding:6px 12px">${locked?'等级不足':'进入'}</button></div>`;}).join('')}`;
 }
 
 function renderCrown(){
   const shards=S.shards||0;
-  return `<h3 style="margin-bottom:10px">👑 十二圣冠</h3>
-  <p class="small" style="margin-bottom:10px">碎片：<span class="hl">${shards}</span>。集满5个可觉醒。圣冠维持30天。</p>
-  ${S.crown?`<div class="card" style="border-color:#fde047;background:linear-gradient(180deg,#2a2410,#0f0d06)"><div style="font-size:24px">${CROWNS.find(c=>c.name===S.crown.name).icon}</div><div style="color:#fde047;font-size:16px;margin:4px 0">${S.crown.name}</div><div class="small">剩余 ${S.crown.days} 天</div></div>`:''}
-  <div class="flex" style="margin-bottom:12px"><button data-act="crownAwaken" ${shards<5||S.crown?'disabled':''} style="padding:12px">${S.crown?'已持有':'觉醒圣冠（5碎片）'}</button></div>
-  <h4 style="font-size:13px;color:#8a7a60;margin:12px 0 8px">圣冠图鉴</h4>
-  ${CROWNS.map(c=>`<div class="row"><span class="k">${c.icon} ${c.name}</span><span class="v small">${Object.entries(c.b).map(([k,v])=>k+' +'+v+'%').join(' ')}</span></div>`).join('')}`;
+  return `<h3 style="margin-bottom:10px">👑 十二圣冠</h3><p class="small" style="margin-bottom:10px">碎片：<span class="hl">${shards}</span>。集满5个可觉醒。圣冠维持30天。</p>${S.crown?`<div class="card" style="border-color:#fde047;background:linear-gradient(180deg,#2a2410,#0f0d06)"><div style="font-size:24px">${CROWNS.find(c=>c.name===S.crown.name).icon}</div><div style="color:#fde047;font-size:16px;margin:4px 0">${S.crown.name}</div><div class="small">剩余 ${S.crown.days} 天</div></div>`:''}<div class="flex" style="margin-bottom:12px"><button data-act="crownAwaken" ${shards<5||S.crown?'disabled':''} style="padding:12px">${S.crown?'已持有':'觉醒圣冠（5碎片）'}</button></div><h4 style="font-size:13px;color:#8a7a60;margin:12px 0 8px">圣冠图鉴</h4>${CROWNS.map(c=>`<div class="row"><span class="k">${c.icon} ${c.name}</span><span class="v small">${Object.entries(c.b).map(([k,v])=>k+' +'+v+'%').join(' ')}</span></div>`).join('')}`;
 }
 
 function renderGuild(){
-  if(S.mode==='single')return `<h3 style="margin-bottom:10px">🏰 公会</h3><p class="small" style="color:#c98080">单机模式下不可用</p><button data-act="mode" style="margin-top:12px">切换联网</button>`;
-  if(!S.guild){
-    return `<h3 style="margin-bottom:10px">🏰 选择公会</h3>
-    ${GUILDS.map(g=>`<div class="item" style="padding:10px"><span style="font-size:20px">${g.icon}</span><span class="iname"><span style="color:var(--gold2)">${g.name}</span><br><span class="small">${g.desc} ${Object.entries(g.b).map(([k,v])=>k+' +'+v).join(' ')}</span></span><button data-act="joinGuild" data-arg="${g.name}" style="padding:6px 12px">加入</button></div>`).join('')}`;
+  if(!socialReady()) return `<div class="card center"><div class="small">正在连接服务器…</div></div>`;
+  if(S.guildId) {
+    if(!social.myGuildData) return `<div class="card center"><div class="small">正在读取公会信息…</div></div>`;
+    const g = social.myGuildData; const lvl = g.level || 1; const exp = g.exp || 0; const nextNeed = lvl * 2000; const expPct = clamp(exp / nextNeed * 100, 0, 100);
+    const memberList = Object.values(g.members || {}).sort((a,b) => b.contrib - a.contrib);
+    return `<div class="card" style="border-color:var(--gold)"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">🏰 ${g.name}</h3><span class="tag" style="border-color:var(--gold);color:var(--gold)">Lv.${lvl}</span></div><div class="small" style="margin-top:4px">会长：${g.leaderName}</div><div style="margin-top:12px"><div class="small">公会经验：${fmt(exp)} / ${fmt(nextNeed)}</div><div class="bar" style="height:8px"><div class="expfill" style="width:${expPct}%"></div></div></div><div class="small" style="margin-top:8px;color:#7fd4a0">✦ 当前公会加成：全队生命/攻击/防御/速度 +${lvl * 3}%</div></div>
+    <div class="card"><h3 style="margin-bottom:8px;font-size:14px">捐献金币（1 CC = 1 经验）</h3><div class="flex"><button data-act="donateGuild" data-arg="1000" ${S.gold<1000?'disabled':''}>捐献 1000 CC</button><button data-act="donateGuild" data-arg="5000" ${S.gold<5000?'disabled':''}>捐献 5000 CC</button></div></div>
+    <div class="card"><h3 style="margin-bottom:8px;font-size:14px">成员列表（${memberList.length}人）</h3>${memberList.map(m => `<div class="row"><span class="k">${m.role==='会长'?'👑 ':''}${m.name}</span><span class="v small">贡献：${fmt(m.contrib||0)}</span></div>`).join('')}</div>
+    <div class="center" style="margin-top:14px"><button onclick="leaveGuild()" style="background:#3a1a1a;color:#e88a7a;border-color:#5a2a2a">退出公会</button></div>`;
   }
-  const g=GUILDS.find(x=>x.name===S.guild);
-  return `<h3 style="margin-bottom:10px">${g.icon} ${g.name}</h3>
-  <div class="row"><span class="k">等级</span><span class="v">Lv.${S.guildLv}/10</span></div>
-  <div class="row"><span class="k">贡献</span><span class="v">${fmt(S.contrib)}</span></div>
-  <div class="row"><span class="k">下一级</span><span class="v">${fmt(S.guildLv*200)}</span></div>
-  <div class="flex" style="margin-top:12px">
-    <button data-act="donate" data-arg="500">捐 500（+50）</button>
-    <button data-act="donate" data-arg="2000">捐 2000（+220）</button>
-  </div>
-  <div style="margin-top:12px"><button data-act="leaveGuild" style="font-size:11px;opacity:.6">退出</button></div>`;
+  const shopTab = UI.guildTab || 'list';
+  return `<div class="tabs" style="margin-bottom:12px"><button class="${shopTab==='list'?'active':''}" data-act="guildTab" data-arg="list">全服公会</button><button class="${shopTab==='create'?'active':''}" data-act="guildTab" data-arg="create">创建公会</button></div>
+  ${shopTab==='create' ? `<div class="card"><h3 style="margin-bottom:8px">创建公会</h3><p class="small" style="margin-bottom:12px">消耗 <span class="hl">${fmt(CREATE_GUILD_COST)} CC</span> 建立属于你的公会。你将成为会长。</p><input id="guildNameInput" placeholder="输入公会名称（2-10字）" maxlength="10" style="margin-bottom:8px"><button onclick="createGuild(document.getElementById('guildNameInput').value)" style="width:100%;padding:12px" ${S.gold<CREATE_GUILD_COST?'disabled':''}>创建公会</button></div>` : `<div class="card"><h3 style="margin-bottom:8px">全服公会列表</h3>${social.allGuilds.length ? social.allGuilds.map(g => `<div class="item" style="padding:10px"><span class="iname"><span class="hl" style="font-size:15px">${g.name}</span> <span class="small">Lv.${g.level||1}</span><br><span class="small">会长：${g.leaderName} · 成员：${Object.keys(g.members||{}).length}人</span></span><button onclick="joinGuild('${g.id}')" style="padding:6px 12px">申请加入</button></div>`).join('') : '<div class="small">目前还没有人创建公会，你可以去建一个！</div>'}</div>`}`;
 }
 
 function renderShop(p){
-  if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0};
-  if(!S.skillbooks)S.skillbooks=[];
-  if(!S.weaponStock)S.weaponStock=[];
-  const shopTab=UI.shopTab||'potion';
-
-  let body='';
-  if(shopTab==='potion'){
-    body=`<div class="small" style="margin-bottom:8px">战斗中可使用的消耗品（当前持有数量）</div>
-    ${Object.entries(POTIONS).map(([k,po])=>`<div class="item" style="padding:10px">
-      <span style="font-size:20px">${po.icon}</span>
-      <span class="iname"><span style="color:var(--gold2)">${po.n}</span> <span class="small">持有 ×${S.potions[k]||0}</span><br><span class="small">${po.d}</span></span>
-      <span class="hl" style="margin-right:8px">${fmt(po.price)}</span>
-      <button data-act="buyPotion" data-arg="${k}" ${S.gold<po.price?'disabled':''} style="padding:6px 12px">购买</button>
-    </div>`).join('')}`;
-  } else if(shopTab==='book'){
-    body=`<div class="small" style="margin-bottom:8px">当前职业「${CLASSES[S.cls].name}」的专属技能书。每本只能买一次。</div>
-    ${(SKILLBOOKS[S.cls]||[]).map(b=>{
-      const owned=S.skillbooks.includes(b.id);
-      return `<div class="item" style="padding:10px">
-        <span style="font-size:20px">📕</span>
-        <span class="iname">
-          <span style="color:var(--gold2)">${b.n}</span>${owned?' <span style="color:#7fd4a0">✓ 已学</span>':''}
-          <br><span class="small">${b.d}${b.mp?'（'+b.mp+'斗气）':''}</span>
-        </span>
-        <span class="hl" style="margin-right:8px">${fmt(b.price)}</span>
-        <button data-act="buyBook" data-arg="${b.id}" ${owned||S.gold<b.price?'disabled':''} style="padding:6px 12px">${owned?'已拥有':'购买'}</button>
-      </div>`;
-    }).join('')}`;
-  } else if(shopTab==='gacha'){
-    body=`<div class="card" style="background:#0f0c09;border-color:#a855f7">
-      <div style="font-size:22px;text-align:center">🎁</div>
-      <div class="center" style="color:#a855f7;font-weight:bold;margin:6px 0">精炼石 · 装备盲盒</div>
-      <p class="small center">随机开出一件<b>史诗 ~ 神话</b>品质的装备（不分部位，无职业限制）。<br>价格：<span class="hl">${fmt(GACHA_PRICE)} CC</span></p>
-      <div class="center" style="margin-top:10px">
-        <button data-act="buyGacha" ${S.gold<GACHA_PRICE?'disabled':''} style="padding:12px 30px">开启盲盒</button>
-      </div>
-    </div>
-    <div class="small" style="margin-top:8px">提示：装备等级与你当前等级相近，适合快速补强一个部位。</div>`;
-  } else {
-    ensureWeaponStock();
-    body=`<div class="item" style="padding:10px;background:#0f0c09;border-color:#c8a050">
-      <span style="font-size:20px">🏪</span>
-      <span class="iname"><span style="color:var(--gold2)">流浪武器商</span><br>
-        <span class="small">每次刷新随机出现 4~5 件武器，品质与职业限制随机。刷新费用 <span class="hl">${fmt(WEAPON_REFRESH_COST)} CC</span>。</span>
-      </span>
-      <button data-act="refreshWeaponShop" ${S.gold<WEAPON_REFRESH_COST?'disabled':''} style="padding:8px 12px">🔄 刷新</button>
-    </div>
-    ${S.weaponStock.length?S.weaponStock.map((it,i)=>{
-      const ok=canEquip(it);
-      return `<div class="item" style="padding:10px;flex-wrap:wrap">
-        <span style="font-size:20px">⚔️</span>
-        <span class="iname" style="flex:1 1 200px">
-          <span class="rar${it.rar}">${it.name}</span>
-          <span class="small"> Lv.${it.lvl} · ${RAR[it.rar].n}</span>
-          <span class="small ${ok?'ok':'danger'}">（${reqLabel(it)}${ok?'':' · 你无法装备'}）</span>
-          <br><span class="small">${STAT_KEYS.filter(k=>it[k]).map(k=>STAT_LABELS[k]+'+'+it[k]).join('　')}</span>
-        </span>
-        <span class="hl" style="margin-right:8px">${fmt(it.shopPrice)}</span>
-        <button data-act="buyWeapon" data-arg="${i}" ${S.gold<it.shopPrice?'disabled':''} style="padding:6px 12px">购买</button>
-      </div>`;
-    }).join(''):'<div class="small">商人的货架空了，刷新一下吧。</div>'}`;
-  }
-
-  return `<h3 style="margin-bottom:10px">🏪 商店</h3>
-  <p class="small" style="margin-bottom:10px">持有：<span class="hl">${fmt(S.gold)} CC</span></p>
-  <div class="tabs" style="margin-bottom:12px">
-    <button class="${shopTab==='potion'?'active':''}" data-act="shopTab" data-arg="potion">药水</button>
-    <button class="${shopTab==='book'?'active':''}" data-act="shopTab" data-arg="book">技能书</button>
-    <button class="${shopTab==='gacha'?'active':''}" data-act="shopTab" data-arg="gacha">盲盒</button>
-    <button class="${shopTab==='weapon'?'active':''}" data-act="shopTab" data-arg="weapon">武器店</button>
-  </div>
-  ${body}`;
+  if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0};if(!S.skillbooks)S.skillbooks=[];if(!S.weaponStock)S.weaponStock=[];
+  const shopTab=UI.shopTab||'potion'; let body='';
+  if(shopTab==='potion'){body=`<div class="small" style="margin-bottom:8px">战斗中可使用的消耗品（当前持有数量）</div>${Object.entries(POTIONS).map(([k,po])=>`<div class="item" style="padding:10px"><span style="font-size:20px">${po.icon}</span><span class="iname"><span style="color:var(--gold2)">${po.n}</span> <span class="small">持有 ×${S.potions[k]||0}</span><br><span class="small">${po.d}</span></span><span class="hl" style="margin-right:8px">${fmt(po.price)}</span><button data-act="buyPotion" data-arg="${k}" ${S.gold<po.price?'disabled':''} style="padding:6px 12px">购买</button></div>`).join('')}`;}
+  else if(shopTab==='book'){body=`<div class="small" style="margin-bottom:8px">当前职业「${CLASSES[S.cls].name}」的专属技能书。每本只能买一次。</div>${(SKILLBOOKS[S.cls]||[]).map(b=>{const owned=S.skillbooks.includes(b.id);return `<div class="item" style="padding:10px"><span style="font-size:20px">📕</span><span class="iname"><span style="color:var(--gold2)">${b.n}</span>${owned?' <span style="color:#7fd4a0">✓ 已学</span>':''}<br><span class="small">${b.d}${b.mp?'（'+b.mp+'斗气）':''}</span></span><span class="hl" style="margin-right:8px">${fmt(b.price)}</span><button data-act="buyBook" data-arg="${b.id}" ${owned||S.gold<b.price?'disabled':''} style="padding:6px 12px">${owned?'已拥有':'购买'}</button></div>`;}).join('')}`;}
+  else if(shopTab==='gacha'){body=`<div class="card" style="background:#0f0c09;border-color:#a855f7"><div style="font-size:22px;text-align:center">🎁</div><div class="center" style="color:#a855f7;font-weight:bold;margin:6px 0">精炼石 · 装备盲盒</div><p class="small center">随机开出一件<b>史诗 ~ 神话</b>品质的装备（不分部位，无职业限制）。<br>价格：<span class="hl">${fmt(GACHA_PRICE)} CC</span></p><div class="center" style="margin-top:10px"><button data-act="buyGacha" ${S.gold<GACHA_PRICE?'disabled':''} style="padding:12px 30px">开启盲盒</button></div></div>`;}
+  else {ensureWeaponStock();body=`<div class="item" style="padding:10px;background:#0f0c09;border-color:#c8a050"><span style="font-size:20px">🏪</span><span class="iname"><span style="color:var(--gold2)">流浪武器商</span><br><span class="small">每次刷新随机出现 4~5 件武器，品质与职业限制随机。刷新费用 <span class="hl">${fmt(WEAPON_REFRESH_COST)} CC</span>。</span></span><button data-act="refreshWeaponShop" ${S.gold<WEAPON_REFRESH_COST?'disabled':''} style="padding:8px 12px">🔄 刷新</button></div>${S.weaponStock.length?S.weaponStock.map((it,i)=>{const ok=canEquip(it);return `<div class="item" style="padding:10px;flex-wrap:wrap"><span style="font-size:20px">⚔️</span><span class="iname" style="flex:1 1 200px"><span class="rar${it.rar}">${it.name}</span><span class="small"> Lv.${it.lvl} · ${RAR[it.rar].n}</span><span class="small ${ok?'ok':'danger'}">（${reqLabel(it)}${ok?'':' · 你无法装备'}）</span><br><span class="small">${STAT_KEYS.filter(k=>it[k]).map(k=>STAT_LABELS[k]+'+'+it[k]).join('　')}</span></span><span class="hl" style="margin-right:8px">${fmt(it.shopPrice)}</span><button data-act="buyWeapon" data-arg="${i}" ${S.gold<it.shopPrice?'disabled':''} style="padding:6px 12px">购买</button></div>`;}).join(''):'<div class="small">商人的货架空了，刷新一下吧。</div>'}`;}
+  return `<h3 style="margin-bottom:10px">🏪 商店</h3><p class="small" style="margin-bottom:10px">持有：<span class="hl">${fmt(S.gold)} CC</span></p><div class="tabs" style="margin-bottom:12px"><button class="${shopTab==='potion'?'active':''}" data-act="shopTab" data-arg="potion">药水</button><button class="${shopTab==='book'?'active':''}" data-act="shopTab" data-arg="book">技能书</button><button class="${shopTab==='gacha'?'active':''}" data-act="shopTab" data-arg="gacha">盲盒</button><button class="${shopTab==='weapon'?'active':''}" data-act="shopTab" data-arg="weapon">武器店</button></div>${body}`;
 }
 
+function renderSocial(){
+  if(!socialReady()){return `<div class="card center"><div class="small">正在连接服务器…</div></div>`;}
+  const myPower=calcPower();const onlineCount=social.friends.filter(f=>f.online).length;const chatFriendData=social.chatFriend?social.friends.find(f=>f.uid===social.chatFriend):null;
+  return `
+  <div class="card">
+    <div class="row"><span class="k">我的名字</span><span class="v">${S.name}</span></div>
+    <div class="row"><span class="k">等级 / 战力</span><span class="v">Lv.${S.level} · ${fmt(myPower)}</span></div>
+    <div class="row"><span class="k">账号状态</span><span class="v">${window.MY_IS_ANON?'游客（未绑定邮箱）':window.MY_EMAIL}</span></div>
+    <div style="margin-top:8px"><div class="small" style="margin-bottom:4px">我的 UID（发给朋友添加你）</div><div style="display:flex;gap:6px"><input id="myUidBox" value="${MY_UID}" readonly style="font-size:11px;font-family:monospace"><button onclick="navigator.clipboard.writeText('${MY_UID}');notify('已复制 UID')" style="padding:8px 12px;white-space:nowrap">复制</button></div></div>
+  </div>
+  <div class="card"><h3 style="margin-bottom:8px">添加好友</h3><div style="display:flex;gap:6px"><input id="friendUidInput" placeholder="粘贴对方 UID…" style="font-size:12px"><button onclick="sendFriendRequest(document.getElementById('friendUidInput').value.trim())" style="padding:8px 12px;white-space:nowrap">发送请求</button></div></div>
+  ${social.requests.length?`<div class="card"><h3 style="margin-bottom:8px">待处理请求（${social.requests.length}）</h3>${social.requests.map(r=>`<div class="item"><span class="iname"><span class="hl">${r.name||r.uid.slice(0,8)}</span> <span class="small">请求加你为好友</span></span><button onclick="acceptFriend('${r.uid}')" style="padding:4px 10px;font-size:11px">接受</button></div>`).join('')}</div>`:''}
+  <div class="card"><h3 style="margin-bottom:8px">好友列表（${social.friends.length}）</h3>${social.friends.length?social.friends.map(f=>`<div class="item"><span class="dot" style="background:${f.online?'#4a7c59':'#5a3a3a'}"></span><span class="iname"><span class="hl">${f.name}</span><span class="small">Lv.${f.level} · 战力 ${fmt(f.power||0)} · ${f.adv||''}</span></span><button onclick="openChat('${f.uid}')" style="padding:4px 10px;font-size:11px">聊天</button></div>`).join(''):'<div class="small">还没有好友，把你的 UID 发给朋友吧。</div>'}</div>
+  ${social.chatFriend?`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3>💬 ${chatFriendData?chatFriendData.name:'好友'}</h3><button onclick="social.chatFriend=null;social.chatMessages=[];if(social.chatUnsub){social.chatUnsub();social.chatUnsub=null;}render()" style="padding:4px 10px;font-size:11px">关闭</button></div><div id="chatBox" class="chat-box">${social.chatMessages.length?social.chatMessages.map(m=>`<div class="chat-msg ${m.from===MY_UID?'me':'other'}"><span class="chat-bubble">${escapeHtml(m.text)}</span></div>`).join(''):'<div class="small">还没有消息</div>'}</div><div style="display:flex;gap:6px"><input id="chatInput" placeholder="输入消息…" style="font-size:12px" onkeydown="if(event.key==='Enter'){sendChatMessage(this.value);this.value=''}"><button onclick="const i=document.getElementById('chatInput');sendChatMessage(i.value);i.value=''" style="padding:8px 12px;white-space:nowrap">发送</button></div></div>`:''}
+  <div class="card"><h3 style="margin-bottom:8px">🏆 全服排行榜 Top 50</h3>${social.leaderboard.length?social.leaderboard.map((u,i)=>{const isMe=u.uid===MY_UID;return `<div class="row"><span class="k" style="${i<3?'color:#ffd700':''}">${i+1}. ${isMe?'<span class="hl">'+escapeHtml(u.name)+'（你）</span>':escapeHtml(u.name)}</span><span class="v small">Lv.${u.level} · 战力 ${fmt(u.power||0)}</span></div>`;}).join(''):'<div class="small">暂无数据</div>'}</div>`;
+}
+
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
 function statusBar(){
-  if(!B||!B.status)return '';
-  const s=B.status;
-  let html='';
+  if(!B||!B.status)return '';const s=B.status;let html='';
   if(s.bleed>0)html+='<span class="status-tag status-bleed">🩸 流血 '+s.bleed+'</span>';
   if(s.burn>0)html+='<span class="status-tag status-burn">🔥 灼烧 '+s.burn+'</span>';
   if(s.freeze>0)html+='<span class="status-tag status-freeze">❄️ 冰冻 '+s.freeze+'</span>';
@@ -1145,53 +949,19 @@ function statusBar(){
 }
 
 function renderBattle(){
-  const p=playerStats();const e=B.enemy;const skills=getSkills();
-  const canAct=!(B.status.freeze>0||B.status.stun>0)&&!B.busy&&!B.over;
+  const p=playerStats();const e=B.enemy;const skills=getSkills();const canAct=!(B.status.freeze>0||B.status.stun>0)&&!B.busy&&!B.over;
   return `
-  <div class="topbar">
-    <span class="pname">${S.name}</span>
-    <span class="tag">Lv.${S.level}</span>
-    <span class="tag">${CLASSES[S.cls].icon} ${S.adv||CLASSES[S.cls].name}</span>
-  </div>
-  <div class="card" style="padding:10px 14px;margin-bottom:10px">
-    ${bar(S.hp,p.hp,'hpfill')}
-    ${bar(S.mp,p.mp,'mpfill')}
-    ${statusBar()}
-  </div>
-  <div class="enemy-box">
-    <span class="enemy-ic">${e.isBoss?'🐲':'👹'}</span>
-    <div class="enemy-name">${e.name} ${e.isBoss?'<span class="tag" style="border-color:#c0392b;color:#e88a7a">BOSS</span>':''}</div>
-    <div class="small">Lv.${e.lv}${e.isBoss?'　下一技能：'+[3,6,9,12].find(n=>n>B.bossTurn)+'回合后':''}</div>
-    ${bar(e.hp,e.maxHp,'hpfill')}
-  </div>
+  <div class="topbar"><span class="pname">${S.name}</span><span class="tag">Lv.${S.level}</span><span class="tag">${CLASSES[S.cls].icon} ${S.adv||CLASSES[S.cls].name}</span></div>
+  <div class="card" style="padding:10px 14px;margin-bottom:10px">${bar(S.hp,p.hp,'hpfill')}${bar(S.mp,p.mp,'mpfill')}${statusBar()}</div>
+  <div class="enemy-box"><span class="enemy-ic">${e.isBoss?'🐲':'👹'}</span><div class="enemy-name">${e.name} ${e.isBoss?'<span class="tag" style="border-color:#c0392b;color:#e88a7a">BOSS</span>':''}</div><div class="small">Lv.${e.lv}${e.isBoss?'　下一技能：'+[3,6,9,12].find(n=>n>B.bossTurn)+'回合后':''}</div>${bar(e.hp,e.maxHp,'hpfill')}</div>
   <div class="card"><div class="log" id="battleLog">${B.log.slice(-40).map(l=>`<div class="${l.t}">${l.m}</div>`).join('')}</div></div>
-  ${B.over?`
-    <div class="card center">
-      ${B.reward.exp?`<div class="hl" style="font-size:15px">战斗胜利</div><div class="small">经验 +${fmt(B.reward.exp)}　金币 +${fmt(B.reward.gold)}</div>${B.reward.items.length?`<div class="small">战利品：${B.reward.items.map(i=>`<span class="rar${i.rar}">${i.name}</span>`).join('、')}</div>`:''}${B.reward.shards?`<div class="small hl">圣冠碎片 +1</div>`:''}`:`<div class="danger" style="font-size:15px">战斗结束</div>`}
-      <div class="flex" style="margin-top:12px"><button data-act="endBattle" style="padding:12px">返 回</button></div>
-    </div>
-  `:`
-    <div style="margin-bottom:8px">
-      ${skills.map((s,i)=>`<button class="skill-btn" data-act="skill" data-arg="${i}" ${!canAct||s.mp>S.mp?'disabled':''}><span>${s.n}</span><small>${s.mp?s.mp+' 斗气':'无消耗'}　${s.d}</small></button>`).join('')}
-      <div style="border-top:1px dashed var(--line);padding-top:8px;margin-top:4px">
-        <div class="small" style="margin-bottom:4px">药水</div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap">
-          ${Object.entries(POTIONS).map(([k,po])=>{
-            const qty=(S.potions&&S.potions[k])||0;
-            return `<button class="potion-btn" data-act="potion" data-arg="${k}" ${!canAct||qty<=0?'disabled':''}>${po.icon} ${po.n}×${qty}</button>`;
-          }).join('')}
-        </div>
-      </div>
-      <button class="skill-btn" data-act="flee" ${!canAct?'disabled':''} style="margin-top:8px"><span>🏃 逃跑</span><small>速度越高成功率越高</small></button>
-    </div>
-  `}`;
+  ${B.over?`<div class="card center">${B.reward.exp?`<div class="hl" style="font-size:15px">战斗胜利</div><div class="small">经验 +${fmt(B.reward.exp)}　金币 +${fmt(B.reward.gold)}</div>${B.reward.items.length?`<div class="small">战利品：${B.reward.items.map(i=>`<span class="rar${i.rar}">${i.name}</span>`).join('、')}</div>`:''}${B.reward.shards?`<div class="small hl">圣冠碎片 +1</div>`:''}`:`<div class="danger" style="font-size:15px">战斗结束</div>`}<div class="flex" style="margin-top:12px"><button data-act="endBattle" style="padding:12px">返 回</button></div></div>`:`<div style="margin-bottom:8px">${skills.map((s,i)=>`<button class="skill-btn" data-act="skill" data-arg="${i}" ${!canAct||s.mp>S.mp?'disabled':''}><span>${s.n}</span><small>${s.mp?s.mp+' 斗气':'无消耗'}　${s.d}</small></button>`).join('')}<div style="border-top:1px dashed var(--line);padding-top:8px;margin-top:4px"><div class="small" style="margin-bottom:4px">药水</div><div style="display:flex;gap:4px;flex-wrap:wrap">${Object.entries(POTIONS).map(([k,po])=>{const qty=(S.potions&&S.potions[k])||0;return `<button class="potion-btn" data-act="potion" data-arg="${k}" ${!canAct||qty<=0?'disabled':''}>${po.icon} ${po.n}×${qty}</button>`;}).join('')}</div></div><button class="skill-btn" data-act="flee" ${!canAct?'disabled':''} style="margin-top:8px"><span>🏃 逃跑</span><small>速度越高成功率越高</small></button></div>`}`;
 }
 
 function render(){
   const root=document.getElementById('root');let html='';
-  if(!S)html=renderTitle();
-  else if(B)html=renderBattle();
-  else html=renderMain();
+  if(!S)html=renderTitle();else if(B)html=renderBattle();else html=renderMain();
+  if(UI.showAuthModal)html+=renderAuthModal();
   html+=`<div id="notif" class="notif" style="display:${UI.notif?'block':'none'}">${UI.notif||''}</div>`;
   root.innerHTML=html;
   const log=document.getElementById('battleLog');if(log)log.scrollTop=log.scrollHeight;
@@ -1203,7 +973,7 @@ document.getElementById('root').addEventListener('click',async ev=>{
   const act=btn.dataset.act;const arg=btn.dataset.arg;
   switch(act){
     case 'newgame':UI.creating=true;S=null;renderCreateScreen();break;
-    case 'loadgame':if(load()){syncVitals();render();notify('存档已读取');if(socialReady())syncMyProfile();}else notify('无存档');break;
+    case 'loadgame':if(load()){syncVitals();render();notify('存档已读取');if(socialReady()){syncMyProfile();listenMyGuild();}}else notify('无存档');break;
     case 'origin':UI.originSel=arg;renderCreateScreen();break;
     case 'class':UI.classSel=arg;renderCreateScreen();break;
     case 'back':S=null;render();break;
@@ -1223,45 +993,17 @@ document.getElementById('root').addEventListener('click',async ev=>{
     case 'flee':flee();break;
     case 'endBattle':B=null;render();break;
     case 'crownAwaken':{if((S.shards||0)<5||S.crown)return;S.shards-=5;const c=pick(CROWNS);S.crown={name:c.name,days:30};S.hp=playerStats().hp;S.mp=playerStats().mp;save();render();if(socialReady())syncMyProfile();notify('👑 觉醒：'+c.name);break;}
-    case 'joinGuild':S.guild=arg;S.guildLv=1;S.contrib=0;save();render();notify('已加入 '+arg);break;
-    case 'donate':{const amt=parseInt(arg);if(S.gold<amt)return;S.gold-=amt;S.contrib+=Math.floor(amt/10);while(S.guildLv<10&&S.contrib>=S.guildLv*200){S.contrib-=S.guildLv*200;S.guildLv++;notify('公会升级至 Lv.'+S.guildLv);}save();render();break;}
-    case 'leaveGuild':S.guild=null;S.guildLv=1;S.contrib=0;save();render();break;
     case 'shopTab':UI.shopTab=arg;if(arg==='weapon')ensureWeaponStock();render();break;
+    case 'guildTab':UI.guildTab=arg;render();break;
+    case 'donateGuild':donateGuild(parseInt(arg));break;
     case 'buyPotion':{const po=POTIONS[arg];if(!po||S.gold<po.price)return;S.gold-=po.price;if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0};S.potions[arg]=(S.potions[arg]||0)+1;save();render();notify('购买 '+po.n);break;}
     case 'buyBook':{const bk=(SKILLBOOKS[S.cls]||[]).find(b=>b.id===arg);if(!bk||S.skillbooks.includes(arg)||S.gold<bk.price)return;S.gold-=bk.price;S.skillbooks.push(arg);save();render();notify('学会技能书：'+bk.n);break;}
-    case 'buyGacha':{
-      if(S.gold<GACHA_PRICE){notify('金币不足');return;}
-      if(S.inv.length>=40){notify('背包已满');return;}
-      S.gold-=GACHA_PRICE;
-      const rar=rnd(4,7);
-      const lv=Math.max(S.level,10);
-      const it=genEquip(pick(SLOTS).id,lv,rar);
-      S.inv.push(it);save();render();
-      notify('🎁 开出：'+it.name);
-      break;
-    }
-    case 'refreshWeaponShop':{
-      if(S.gold<WEAPON_REFRESH_COST){notify('金币不足');return;}
-      S.gold-=WEAPON_REFRESH_COST;
-      refreshWeaponStock();save();render();notify('武器已刷新');
-      break;
-    }
-    case 'buyWeapon':{
-      const idx=parseInt(arg);
-      if(!S.weaponStock)return;
-      const it=S.weaponStock[idx];if(!it)return;
-      if(S.gold<it.shopPrice){notify('金币不足');return;}
-      if(S.inv.length>=40){notify('背包已满');return;}
-      S.gold-=it.shopPrice;
-      const copy=JSON.parse(JSON.stringify(it));
-      delete copy.shopPrice;
-      S.inv.push(copy);
-      S.weaponStock.splice(idx,1);
-      save();render();
-      notify('购买 '+copy.name);
-      break;
-    }
-    case 'reset':if(confirm('删除存档重新开始？（会清空本地存档，云端资料仍保留）')){try{localStorage.removeItem('holycrown_save');}catch(e){}S=null;B=null;UI.creating=true;UI.classSel=null;render();}break;
+    case 'buyGacha':{if(S.gold<GACHA_PRICE){notify('金币不足');return;}if(S.inv.length>=40){notify('背包已满');return;}S.gold-=GACHA_PRICE;const rar=rnd(4,7);const lv=Math.max(S.level,10);const it=genEquip(pick(SLOTS).id,lv,rar);S.inv.push(it);save();render();notify('🎁 开出：'+it.name);break;}
+    case 'refreshWeaponShop':{if(S.gold<WEAPON_REFRESH_COST){notify('金币不足');return;}S.gold-=WEAPON_REFRESH_COST;refreshWeaponStock();save();render();notify('武器已刷新');break;}
+    case 'buyWeapon':{const idx=parseInt(arg);if(!S.weaponStock)return;const it=S.weaponStock[idx];if(!it)return;if(S.gold<it.shopPrice){notify('金币不足');return;}if(S.inv.length>=40){notify('背包已满');return;}S.gold-=it.shopPrice;const copy=JSON.parse(JSON.stringify(it));delete copy.shopPrice;S.inv.push(copy);S.weaponStock.splice(idx,1);save();render();notify('购买 '+copy.name);break;}
+    case 'showAuth':UI.showAuthModal=true;UI.authMode='login';render();break;
+    case 'logout':logout();break;
+    case 'reset':if(confirm('删除本地存档重新开始？（如果是正式账号，云存档依然存在）')){try{localStorage.removeItem('holycrown_save');}catch(e){}S=null;B=null;UI.creating=true;UI.classSel=null;render();}break;
   }
 });
 
@@ -1274,17 +1016,16 @@ function beginGame(){
   const inp=document.getElementById('nameInput');if(inp)UI.name=inp.value.trim();
   if(!UI.classSel){notify('请选择职业');return;}
   if(!UI.name){notify('请输入角色名');return;}
-  S={name:UI.name,origin:UI.originSel,cls:UI.classSel,level:1,exp:0,hp:0,mp:0,gold:500,shards:0,inv:[],equip:{weapon:null,helmet:null,armor:null,boots:null,bracer:null,bracelet:null,ring:null,necklace:null},adv:null,sub:null,crown:null,titles:[],guild:null,guildLv:1,contrib:0,mode:'online',day:1,kills:0,deaths:0,skillbooks:[],potions:{hp:2,hpBig:0,mp:1,ultimate:0},weaponStock:[]};
+  S={name:UI.name,origin:UI.originSel,cls:UI.classSel,level:1,exp:0,hp:0,mp:0,gold:500,shards:0,inv:[],equip:{weapon:null,helmet:null,armor:null,boots:null,bracer:null,bracelet:null,ring:null,necklace:null},adv:null,sub:null,crown:null,titles:[],guildId:null,mode:'online',day:1,kills:0,deaths:0,skillbooks:[],potions:{hp:2,hpBig:0,mp:1,ultimate:0},weaponStock:[]};
   const p=playerStats();S.hp=p.hp;S.mp=p.mp;
   const starter=genEquip('weapon',1,1);starter.name='新手·'+starter.name;S.equip.weapon=starter;
   B=null;UI.tab='explore';save();render();notify('欢迎来到阿斯米德约顿');
-  if(socialReady())syncMyProfile();
+  if(socialReady()){syncMyProfile();listenMyGuild();}
 }
 
 (function init(){
   if(load()){syncVitals();render();}
   else{render();}
-  // 开始等待 Firebase 连接
   setTimeout(()=>waitForFirebase(0),800);
 })();
 </script>
