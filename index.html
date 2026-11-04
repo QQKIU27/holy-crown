@@ -1,0 +1,1292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>圣冠 / Holy Crown</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--gold:#d4af6a;--gold2:#f0d79a;--line:#3a2f22;--txt:#c9b896}
+body{background:radial-gradient(ellipse at 50% -10%,#2a1f14 0%,#0c0a08 60%,#050403 100%);color:var(--txt);font-family:"Noto Serif SC","Songti SC","SimSun",serif;min-height:100vh;padding:10px;font-size:14px;line-height:1.6}
+#root{max-width:960px;margin:0 auto}
+h1,h2,h3{color:var(--gold2);font-weight:600;letter-spacing:1px}
+button{font-family:inherit;cursor:pointer;border:1px solid var(--line);background:linear-gradient(180deg,#241c14,#15100c);color:var(--gold2);padding:8px 14px;border-radius:3px;font-size:13px;transition:.15s}
+button:hover:not(:disabled){background:linear-gradient(180deg,#332618,#1d1610);border-color:var(--gold)}
+button:disabled{opacity:.35;cursor:not-allowed}
+input{font-family:inherit;background:#0f0c09;border:1px solid var(--line);color:var(--gold2);padding:9px 12px;border-radius:3px;font-size:14px;width:100%}
+input:focus{outline:none;border-color:var(--gold)}
+.card{background:linear-gradient(180deg,rgba(30,24,17,.95),rgba(14,11,8,.95));border:1px solid var(--line);border-radius:4px;padding:14px;margin-bottom:10px;position:relative}
+.title-screen{text-align:center;padding:60px 20px}
+.title-screen h1{font-size:44px;letter-spacing:10px;margin-bottom:6px;background:linear-gradient(180deg,#f7e6b8,#a8842f);-webkit-background-clip:text;background-clip:text;color:transparent}
+.subtitle{color:#6b5b45;letter-spacing:5px;font-size:12px;margin-bottom:36px}
+.topbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:linear-gradient(180deg,#1d1710,#0e0b08);border:1px solid var(--line);border-radius:4px;padding:10px 14px;margin-bottom:10px}
+.pname{color:var(--gold2);font-size:16px}
+.tag{font-size:11px;padding:2px 8px;border:1px solid var(--line);border-radius:10px;color:#8a7a60;background:#0f0c09}
+.tag.on{border-color:#4a7c59;color:#7fd4a0}
+.tag.off{border-color:#5a3a3a;color:#c98080}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.tabs button{flex:1;min-width:60px;padding:8px 6px;font-size:12px}
+.tabs button.active{background:linear-gradient(180deg,#3d2e19,#221a10);border-color:var(--gold);color:#fff2cc}
+.bar{height:16px;background:#0a0806;border:1px solid var(--line);border-radius:8px;overflow:hidden;position:relative;margin:4px 0}
+.bar>div{height:100%;transition:width .3s}
+.bar span{position:absolute;inset:0;text-align:center;font-size:11px;line-height:16px;color:#fff;text-shadow:0 0 4px #000}
+.hpfill{background:linear-gradient(90deg,#7a1f1f,#c0392b)}
+.mpfill{background:linear-gradient(90deg,#1f3a7a,#3b6fd4)}
+.expfill{background:linear-gradient(90deg,#6b5a1f,#d4af6a)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.cls-card{border:1px solid var(--line);border-radius:4px;padding:10px;cursor:pointer;background:linear-gradient(180deg,#191410,#0e0b08);transition:.15s;text-align:center}
+.cls-card:hover{border-color:var(--gold)}
+.cls-card.sel{border-color:var(--gold);background:linear-gradient(180deg,#332618,#1a130c)}
+.cls-card .ic{font-size:26px;display:block;margin-bottom:4px}
+.cls-card .nm{color:var(--gold2);font-size:14px}
+.cls-card .ds{font-size:11px;color:#7a6a52;margin-top:4px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px dashed rgba(58,47,34,.6);font-size:13px}
+.row:last-child{border-bottom:none}
+.row .k{color:#8a7a60}
+.row .v{color:var(--gold2);font-weight:600}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:3px;background:#100d0a;margin-bottom:6px;font-size:13px}
+.item .iname{flex:1;min-width:0}
+.log{max-height:220px;overflow-y:auto;font-size:13px;line-height:1.7}
+.log div{padding:1px 0;border-bottom:1px solid rgba(58,47,34,.3)}
+.log .dmg{color:#e88a7a}
+.log .heal{color:#8ed49a}
+.log .crit{color:#ffd700;font-weight:bold}
+.log .sys{color:#6b5b45;font-style:italic}
+.log .win{color:#7fd4a0;font-weight:bold}
+.log .lose{color:#c0392b;font-weight:bold}
+.log .skill{color:#a855f7;font-weight:bold}
+.enemy-box{text-align:center;padding:18px;border:1px solid var(--line);border-radius:4px;background:radial-gradient(circle at 50% 40%,#241a12,#0b0907);margin-bottom:10px}
+.enemy-ic{font-size:48px;display:block;margin-bottom:6px}
+.enemy-name{color:#e8c88a;font-size:17px;letter-spacing:2px}
+.skill-btn{width:100%;text-align:left;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+.skill-btn small{color:#7a6a52;font-size:11px;font-weight:normal}
+.potion-btn{padding:8px 10px;font-size:12px;margin:2px}
+.status-bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.status-tag{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:bold}
+.status-bleed{background:#4a1f1f;color:#e88a7a;border:1px solid #c0392b}
+.status-burn{background:#4a3018;color:#f0b060;border:1px solid #f97316}
+.status-freeze{background:#1a3050;color:#7fd4e8;border:1px solid #3b6fd4}
+.status-stun{background:#3a1a4a;color:#c88ae8;border:1px solid #a855f7}
+.notif{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#241c14;border:1px solid var(--gold);color:var(--gold2);padding:8px 20px;border-radius:3px;z-index:99;font-size:13px}
+.rar0{color:#8a8a8a}.rar1{color:#b87333}.rar2{color:#c8c8c8}.rar3{color:#ffd700}.rar4{color:#a855f7}.rar5{color:#22d3ee}.rar6{color:#f97316}.rar7{color:#ef4444}.rar8{color:#fde047}
+.small{font-size:11px;color:#6b5b45}
+.center{text-align:center}
+.flex{display:flex;gap:8px;flex-wrap:wrap}
+.flex>*{flex:1;min-width:120px}
+.hl{color:var(--gold2)}
+.danger{color:#e88a7a}
+.ok{color:#7fd4a0}
+.chat-box{max-height:240px;overflow-y:auto;border:1px solid var(--line);border-radius:3px;padding:8px;margin-bottom:8px;background:#0a0806}
+.chat-msg{margin-bottom:6px}
+.chat-msg.me{text-align:right}
+.chat-bubble{display:inline-block;max-width:80%;padding:6px 10px;border-radius:6px;font-size:12px}
+.chat-msg.me .chat-bubble{background:#3d2e19;color:var(--gold2)}
+.chat-msg.other .chat-bubble{background:#1a1a1a;color:#b0a080}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- ================= Firebase 模块脚本 ================= -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getDatabase, ref, set, push, onValue, query, orderByChild, limitToLast, get, update, remove, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDWw2HU6forTQRcLeXjrlef2xAjZWGh23U",
+    authDomain: "project-4447431414273875664.firebaseapp.com",
+    databaseURL: "https://project-4447431414273875664-default-rtdb.firebaseio.com",
+    projectId: "project-4447431414273875664",
+    storageBucket: "project-4447431414273875664.firebasestorage.app",
+    messagingSenderId: "1059162705317",
+    appId: "1:1059162705317:web:dd0a3f4328f7392e0a2c4c"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getDatabase(app);
+
+  window.FB = { auth, db, ref, set, push, onValue, query, orderByChild, limitToLast, get, update, remove, serverTimestamp };
+
+  signInAnonymously(auth).catch(err => {
+    console.error("匿名登录失败:", err);
+    window.FB_ERROR = err.message;
+  });
+
+  onAuthStateChanged(auth, user => {
+    if (user) {
+      window.MY_UID = user.uid;
+      console.log("已连接 Firebase，UID:", user.uid);
+    }
+  });
+</script>
+
+<!-- ================= 游戏主脚本 ================= -->
+<script>
+const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const rf=(a,b)=>a+Math.random()*(b-a);
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const fmt=n=>Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',');
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+const RAR=[{n:'无品阶',m:1},{n:'青铜',m:1.35},{n:'白银',m:1.75},{n:'黄金',m:2.3},{n:'史诗',m:3},{n:'遗迹',m:4},{n:'传说',m:5.5},{n:'神话',m:7.5},{n:'三日月',m:10}];
+
+const CLASSES={
+  sword:{key:'sword',name:'剑士',icon:'🗡️',desc:'攻守均衡',hp:130,mp:40,atk:15,def:12,spd:11,crit:8,hpG:24,mpG:5,atkG:3.4,defG:2.6,spdG:0.9,skills:[{n:'斩击',mp:0,mul:1,t:'atk',d:'挥剑'},{n:'剑气斩',mp:12,mul:1.85,t:'atk',d:'剑气'},{n:'铁壁',mp:10,t:'buff',d:'防御+60% 3回合'}],adv:[{n:'魔剑士',atkMul:1.15,mpMul:1.4,skill:{n:'魔剑·炎',mp:22,mul:2.6,t:'atk',d:'烈焰剑'}},{n:'银剑士',hpMul:1.15,defMul:1.2,skill:{n:'银月斩',mp:20,mul:2.5,t:'atk',d:'银色剑芒'}}]},
+  spear:{key:'spear',name:'长枪',icon:'🔱',desc:'攻防一体',hp:160,mp:30,atk:16,def:14,spd:8,crit:5,hpG:30,mpG:3,atkG:3.2,defG:3,spdG:0.6,skills:[{n:'突刺',mp:0,mul:1,t:'atk',d:'直刺'},{n:'龙牙突',mp:14,mul:1.9,t:'atk',d:'斗气突刺'},{n:'连环刺',mp:22,mul:0.8,hits:3,t:'atk',d:'三连刺'}],adv:[{n:'龙骑士',hpMul:1.25,atkMul:1.1,skill:{n:'龙枪·坠星',mp:26,mul:2.9,t:'atk',d:'龙枪坠落'}},{n:'圣枪卫',defMul:1.4,hpMul:1.2,skill:{n:'圣枪守护',mp:16,t:'buff',d:'防御+80%'}}]},
+  mage:{key:'mage',name:'法师',icon:'🔥',desc:'毁灭意志',hp:90,mp:90,atk:18,def:7,spd:10,crit:7,hpG:16,mpG:12,atkG:4.2,defG:1.5,spdG:0.8,skills:[{n:'火球术',mp:8,mul:1.6,t:'atk',d:'火球'},{n:'冰锥术',mp:14,mul:2,t:'atk',d:'冰锥'},{n:'雷霆万钧',mp:26,mul:2.9,t:'atk',d:'落雷'}],adv:[{n:'炽焰剑士',atkMul:1.2,hpMul:1.15,skill:{n:'炽焰爆裂',mp:24,mul:2.8,t:'atk',d:'烈焰爆炸'}},{n:'至高大魔法师',mpMul:1.6,atkMul:1.25,skill:{n:'星轨崩落',mp:34,mul:3.4,t:'atk',d:'引落星轨'}}]},
+  priest:{key:'priest',name:'圣职',icon:'✨',desc:'圣光庇护',hp:120,mp:80,atk:13,def:11,spd:10,crit:6,hpG:22,mpG:11,atkG:2.8,defG:2.4,spdG:0.8,skills:[{n:'圣光弹',mp:6,mul:1.4,t:'atk',d:'圣光'},{n:'治疗术',mp:16,t:'heal',mul:2.6,d:'恢复生命'},{n:'神罚',mp:24,mul:2.6,t:'atk',d:'审判之光'}],adv:[{n:'圣骑士',defMul:1.35,hpMul:1.25,skill:{n:'慈悲之剑',mp:22,mul:2.5,t:'atk',d:'圣光斩'}},{n:'圣主',mpMul:1.4,atkMul:1.2,skill:{n:'圣域降临',mp:26,t:'heal',mul:4,d:'大幅恢复'}}]},
+  summoner:{key:'summoner',name:'召唤',icon:'🐉',desc:'异界契约',hp:110,mp:85,atk:16,def:9,spd:10,crit:6,hpG:20,mpG:11,atkG:3.6,defG:1.9,spdG:0.8,skills:[{n:'灵魂冲击',mp:6,mul:1.3,t:'atk',d:'灵体'},{n:'召唤·影狼',mp:16,mul:2,t:'atk',d:'影狼'},{n:'召唤·龙魂',mp:30,mul:3.1,t:'atk',d:'龙魂'}],adv:[{n:'龙神主',atkMul:1.25,mpMul:1.3,skill:{n:'日月龙息',mp:30,mul:3.3,t:'atk',d:'龙息'}},{n:'亡灵统领',hpMul:1.2,atkMul:1.15,skill:{n:'亡灵大军',mp:28,mul:0.9,hits:3,t:'atk',d:'亡者'}}]},
+  archer:{key:'archer',name:'弓箭',icon:'🏹',desc:'风之猎手',hp:105,mp:50,atk:17,def:9,spd:14,crit:14,hpG:19,mpG:6,atkG:3.9,defG:1.9,spdG:1.3,skills:[{n:'连射',mp:0,mul:0.7,hits:2,t:'atk',d:'两连射'},{n:'穿透箭',mp:12,mul:1.9,t:'atk',d:'破甲'},{n:'箭雨',mp:24,mul:0.9,hits:3,t:'atk',d:'覆盖箭雨'}],adv:[{n:'苍穹之主',spdMul:1.3,critMul:1.2,skill:{n:'天穿之矢',mp:24,mul:3,t:'atk',d:'贯穿苍穹'}},{n:'天空弓',atkMul:1.3,skill:{n:'千羽落',mp:22,mul:0.8,hits:4,t:'atk',d:'千箭'}}]},
+  alchemist:{key:'alchemist',name:'炼金',icon:'⚗️',desc:'爆炸即真理',hp:115,mp:70,atk:15,def:10,spd:10,crit:8,hpG:21,mpG:9,atkG:3.3,defG:2.2,spdG:0.8,skills:[{n:'火焰瓶',mp:8,mul:1.6,t:'atk',d:'燃烧瓶'},{n:'腐蚀酸液',mp:14,mul:1.8,t:'atk',d:'削弱防御'},{n:'剧毒瓦斯',mp:20,mul:2.4,t:'atk',d:'毒雾'}],adv:[{n:'铁炮皇',atkMul:1.3,skill:{n:'黑巴隆炮击',mp:24,mul:3,t:'atk',d:'火炮'}},{n:'机械师',defMul:1.3,hpMul:1.2,skill:{n:'蒸汽巨像',mp:22,mul:2.4,t:'atk',d:'机械'}}]},
+  blade:{key:'blade',name:'刀客',icon:'⚔️',desc:'一击必杀',hp:115,mp:45,atk:19,def:10,spd:13,crit:16,hpG:21,mpG:5,atkG:4.3,defG:2.1,spdG:1.2,skills:[{n:'拔刀斩',mp:0,mul:1.1,t:'atk',d:'拔刀'},{n:'居合',mp:14,mul:2.2,t:'atk',d:'凝神'},{n:'月影',mp:26,mul:2.9,t:'atk',d:'月下斩'}],adv:[{n:'剑圣·刃',atkMul:1.3,critMul:1.25,skill:{n:'无念一心',mp:28,mul:3.4,t:'atk',d:'心刃'}},{n:'剑仙',spdMul:1.25,atkMul:1.2,skill:{n:'剑临九州',mp:26,mul:3.1,t:'atk',d:'御剑'}}]},
+  fighter:{key:'fighter',name:'武者',icon:'👊',desc:'近身格斗',hp:140,mp:40,atk:17,def:12,spd:12,crit:10,hpG:26,mpG:4,atkG:3.8,defG:2.5,spdG:1,skills:[{n:'拳击',mp:0,mul:0.8,hits:2,t:'atk',d:'两拳'},{n:'升龙拳',mp:12,mul:1.9,t:'atk',d:'勾拳'},{n:'百裂拳',mp:24,mul:0.6,hits:5,t:'atk',d:'连打'}],adv:[{n:'斗天王',atkMul:1.35,hpMul:1.15,skill:{n:'百胜·神拳',mp:26,mul:3.3,t:'atk',d:'神拳'}},{n:'魔神王',atkMul:1.2,hpMul:1.3,skill:{n:'魔神降世',mp:28,mul:3,t:'atk',d:'魔神'}}]},
+  assassin:{key:'assassin',name:'刺客',icon:'🩸',desc:'一击离场',hp:100,mp:50,atk:18,def:8,spd:16,crit:20,hpG:18,mpG:6,atkG:4.1,defG:1.6,spdG:1.5,skills:[{n:'背刺',mp:0,mul:1.4,t:'atk',d:'背击'},{n:'影袭',mp:12,mul:2.1,t:'atk',d:'影袭'},{n:'致命一击',mp:24,mul:3.2,t:'atk',d:'要害'}],adv:[{n:'暗影君主',critMul:1.4,spdMul:1.2,skill:{n:'影杀·绝',mp:26,mul:3.6,t:'atk',d:'绝杀'}},{n:'深渊紫百合',atkMul:1.25,hpMul:1.15,skill:{n:'紫百合之毒',mp:22,mul:2.8,t:'atk',d:'毒刃'}}]},
+  guardian:{key:'guardian',name:'盾卫',icon:'🛡️',desc:'不可撼动',hp:180,mp:40,atk:12,def:18,spd:7,crit:5,hpG:34,mpG:4,atkG:2.4,defG:3.8,spdG:0.5,skills:[{n:'盾击',mp:0,mul:1,t:'atk',d:'撞盾'},{n:'坚守',mp:8,t:'buff',d:'防御+100%'},{n:'盾墙冲击',mp:16,mul:1.8,t:'atk',d:'盾冲'}],adv:[{n:'不灭皇',defMul:1.5,hpMul:1.35,skill:{n:'不灭壁垒',mp:20,t:'buff',d:'防御+150%'}},{n:'圣主·守护',defMul:1.4,atkMul:1.15,skill:{n:'圣盾反击',mp:22,mul:2.6,t:'atk',d:'盾反'}}]}
+};
+
+const CLASS_KEYS=Object.keys(CLASSES);
+
+const SKILLBOOKS={
+  sword:[{id:'sword_0',n:'剑圣奥义·天翔',mp:30,mul:3.5,t:'atk',d:'从天而降的一剑',price:2000},{id:'sword_1',n:'万剑归宗',mp:40,mul:1,hits:5,t:'atk',d:'万剑齐发',price:5000},{id:'sword_2',n:'剑心通明',mp:35,t:'heal',mul:4,d:'恢复大量生命',price:8000}],
+  spear:[{id:'spear_0',n:'龙破九天',mp:30,mul:3.4,t:'atk',d:'龙之突刺',price:2000},{id:'spear_1',n:'千枪归一',mp:40,mul:0.9,hits:5,t:'atk',d:'千枪连击',price:5000},{id:'spear_2',n:'不动如山',mp:25,t:'buff',d:'防御+150% 3回合',price:8000}],
+  mage:[{id:'mage_0',n:'禁咒·陨星',mp:45,mul:4,t:'atk',d:'召唤陨石',price:2000},{id:'mage_1',n:'元素洪流',mp:40,mul:1.1,hits:4,t:'atk',d:'元素连击',price:5000},{id:'mage_2',n:'魔力涌动',mp:0,t:'mana',mul:0.5,d:'恢复斗气',price:8000}],
+  priest:[{id:'priest_0',n:'圣光裁决',mp:30,mul:3.3,t:'atk',d:'圣光审判',price:2000},{id:'priest_1',n:'神圣新星',mp:40,t:'heal',mul:5,d:'强力治疗',price:5000},{id:'priest_2',n:'神恩庇护',mp:30,t:'buff',d:'防御+120% 3回合',price:8000}],
+  summoner:[{id:'summoner_0',n:'巨龙降临',mp:35,mul:3.8,t:'atk',d:'召唤巨龙',price:2000},{id:'summoner_1',n:'万灵狂潮',mp:40,mul:1,hits:5,t:'atk',d:'万灵冲锋',price:5000},{id:'summoner_2',n:'灵魂链接',mp:20,t:'heal',mul:3.5,d:'恢复生命',price:8000}],
+  archer:[{id:'archer_0',n:'贯日之矢',mp:30,mul:3.6,t:'atk',d:'贯穿太阳',price:2000},{id:'archer_1',n:'暴雨箭阵',mp:40,mul:0.8,hits:6,t:'atk',d:'箭如雨下',price:5000},{id:'archer_2',n:'鹰眼',mp:20,t:'buff',d:'暴击率提升',price:8000}],
+  alchemist:[{id:'alchemist_0',n:'终焉药剂',mp:35,mul:3.7,t:'atk',d:'爆炸药剂',price:2000},{id:'alchemist_1',n:'万金油',mp:30,t:'heal',mul:3.8,d:'恢复生命',price:5000},{id:'alchemist_2',n:'改造手术',mp:40,t:'buff',d:'攻击+100% 3回合',price:8000}],
+  blade:[{id:'blade_0',n:'一刀两断',mp:35,mul:4,t:'atk',d:'斩断一切',price:2000},{id:'blade_1',n:'万华镜',mp:40,mul:0.9,hits:6,t:'atk',d:'幻影连斩',price:5000},{id:'blade_2',n:'心眼',mp:20,t:'buff',d:'下回合必暴击',price:8000}],
+  fighter:[{id:'fighter_0',n:'究极奥义',mp:30,mul:3.6,t:'atk',d:'最强一拳',price:2000},{id:'fighter_1',n:'百裂连打',mp:40,mul:0.6,hits:8,t:'atk',d:'百裂连击',price:5000},{id:'fighter_2',n:'钢铁意志',mp:20,t:'buff',d:'防御+100% 2回合',price:8000}],
+  assassin:[{id:'assassin_0',n:'暗影绝杀',mp:30,mul:4,t:'atk',d:'致命一击',price:2000},{id:'assassin_1',n:'千影乱舞',mp:40,mul:0.8,hits:6,t:'atk',d:'千影连击',price:5000},{id:'assassin_2',n:'隐身',mp:15,t:'buff',d:'下一击必暴击',price:8000}],
+  guardian:[{id:'guardian_0',n:'盾碎山河',mp:30,mul:3.2,t:'atk',d:'巨盾冲锋',price:2000},{id:'guardian_1',n:'圣盾守护',mp:25,t:'buff',d:'防御+200% 3回合',price:5000},{id:'guardian_2',n:'不屈意志',mp:30,t:'heal',mul:4.5,d:'恢复大量生命',price:8000}]
+};
+
+const BOSS_SKILLS=[
+  {n:'撕裂爪击',effect:'bleed',turns:3,mul:1.3,d:'流血3回合'},
+  {n:'冰封咆哮',effect:'freeze',turns:1,mul:1.2,d:'冰冻1回合'},
+  {n:'灼热吐息',effect:'burn',turns:3,mul:1.4,d:'灼烧3回合'},
+  {n:'嗜血撕咬',effect:'drain',turns:0,mul:1.5,d:'吸血'},
+  {n:'眩晕冲击',effect:'stun',turns:1,mul:1.1,d:'眩晕1回合'}
+];
+
+const POTIONS={
+  hp:{n:'生命药水',icon:'🩸',price:200,d:'恢复30%生命'},
+  hpBig:{n:'高级生命药水',icon:'💗',price:500,d:'恢复60%生命'},
+  mp:{n:'斗气药水',icon:'💠',price:200,d:'恢复50%斗气'},
+  ultimate:{n:'万能药水',icon:'🌟',price:800,d:'恢复40%生命和斗气'}
+};
+
+const GACHA_PRICE=1500;
+const WEAPON_REFRESH_COST=300;
+
+const ORIGINS={
+  julius:{name:'尤利乌帝国',icon:'👑',desc:'铁冠之下',bonus:{atkMul:1.06,hpMul:1.03}},
+  caeria:{name:'凯瑞亚七叶圣国',icon:'🌿',desc:'根扎于土',bonus:{hpMul:1.12,defMul:1.05}},
+  lonbass:{name:'朗不斯自由城邦',icon:'⛵',desc:'帆不问来风',bonus:{goldMul:1.25,critMul:1.08,atkMul:1.03}}
+};
+
+const REGIONS=[
+  {name:'尤利乌外围公国',min:1,max:20,icon:'🏰',desc:'新手起点',enemies:['变异野狼','流窜盗贼','矿坑蜘蛛','落单佣兵','沼泽巨蜥']},
+  {name:'南凯瑞亚·青翠平原',min:20,max:45,icon:'🌿',desc:'活着的森林',enemies:['荆棘藤蔓','森林守卫','灰叶叛兵','梦溺者','草元素兽']},
+  {name:'东朗不斯·自由港',min:45,max:70,icon:'⛵',desc:'商业之都',enemies:['港口打手','走私商人','炼金失控体','铁索监工','海盗']},
+  {name:'血泪荒原',min:70,max:95,icon:'🩸',desc:'禁地',enemies:['血泪狼','结晶巨人','泪妖','变异圣骑士','泣血残兵']},
+  {name:'永冻荒原·北境',min:95,max:120,icon:'❄️',desc:'终焉之地',enemies:['冰霜古狼','负罪苦修者','永冻亡魂','玄冰巨魔','狼王眷属']},
+  {name:'米德海姆·圣城废墟',min:120,max:145,icon:'⛪',desc:'旧世界残骸',enemies:['沉没圣卫','赎罪者尸骸','卡加欧残影','原罪结晶','深渊低语者']},
+  {name:'赫尔约海姆·深渊裂隙',min:145,max:160,icon:'🕳️',desc:'深渊上升',enemies:['深渊使徒','原胚造物','旧神残念','虚空吞噬者','堕天使']}
+];
+
+const DUNGEONS=[
+  {name:'外围矿坑',lv:3,icon:'⛏️',boss:'矿坑巨蛛',desc:'废弃矿坑'},
+  {name:'盗贼营地',lv:8,icon:'🏕️',boss:'盗贼头目·疤脸',desc:'盗贼老巢'},
+  {name:'净世之旅',lv:15,icon:'⚜️',boss:'净世圣骑士',desc:'净世仪式'},
+  {name:'七日圣歌',lv:25,icon:'🎼',boss:'圣歌合唱长',desc:'礼拜堂'},
+  {name:'剑圣·序',lv:35,icon:'🗡️',boss:'序章守门人',desc:'剑圣之路'},
+  {name:'剑圣·我流',lv:45,icon:'⚔️',boss:'我流·剑鬼',desc:'我流试炼'},
+  {name:'黄庭神宫',lv:55,icon:'🏯',boss:'黄庭星轨守护者',desc:'七神座中枢'},
+  {name:'哀霜叙事诗',lv:70,icon:'❄️',boss:'冰封王座上的王',desc:'唯一的王'},
+  {name:'深海龙主',lv:85,icon:'🌊',boss:'深海龙主·尼德霍格残影',desc:'时空之龙'},
+  {name:'沉没圣城·卡加欧伦',lv:105,icon:'⛪',boss:'教宗奥尼希留斯六世的执念',desc:'圣庭首都'},
+  {name:'血泪荒原·深处',lv:125,icon:'🩸',boss:'泣血者',desc:'血泪源头'},
+  {name:'格奥罗顿的黄金巢穴',lv:145,icon:'🐲',boss:'黄金古龙·格奥罗顿',desc:'古龙巢穴'}
+];
+
+const CROWNS=[
+  {name:'第一圣冠·天空之主',icon:'🌪️',b:{atk:18,spd:12},s:'掌控天穹'},
+  {name:'第二圣冠·双首鹰之刃',icon:'🦅',b:{atk:22,crit:8},s:'分裂战斗体'},
+  {name:'第三圣冠·兵与龙之主',icon:'🐲',b:{atk:20,hp:15},s:'龙魂亡灵'},
+  {name:'第四圣冠·青铜人类',icon:'🥉',b:{hp:25,def:20},s:'完美躯体'},
+  {name:'第五圣冠·史诗的英雄王',icon:'👑',b:{atk:25,hp:10},s:'增幅技能'},
+  {name:'第六圣冠·罪孽的白银之人',icon:'⛓️',b:{atk:30},s:'操控罪孽'},
+  {name:'第七圣冠·太阳的圣子',icon:'☀️',b:{atk:20,mp:20},s:'AOE圣光'},
+  {name:'第八圣冠·七元素圣座',icon:'🔮',b:{atk:18,mp:25},s:'七元素'},
+  {name:'第九圣冠·黑铁王冠的圣国',icon:'🏰',b:{def:25,hp:20},s:'领域结界'},
+  {name:'第十圣冠·自由的羽翼',icon:'🕊️',b:{spd:35,crit:10},s:'绝对速度'},
+  {name:'第十一圣冠·黄昏的终焉曲',icon:'🌇',b:{atk:35},s:'强制终结'},
+  {name:'第十二圣冠·神诞之日',icon:'🌟',b:{atk:30,hp:30,def:30},s:'新神诞生'}
+];
+
+const TITLES=[
+  {name:'初出茅庐',b:{atk:3}},{name:'边境行者',b:{hp:8,def:5}},{name:'沙场老将',b:{atk:8,def:8}},
+  {name:'传说之人',b:{atk:15,hp:15}},{name:'圣域守护者',b:{atk:20,def:20,hp:20}},
+  {name:'弑神者',b:{atk:12,crit:5}},{name:'无声的婚约',b:{hp:20,mp:20}},{name:'自由的黄金鸟',b:{atk:10,spd:10}}
+];
+
+const GUILDS=[
+  {name:'万重俱乐部',icon:'🌀',desc:'老牌豪门',b:{atk:6}},
+  {name:'巡天俱乐部',icon:'🌌',desc:'三连冠王朝',b:{spd:6}},
+  {name:'神心公会',icon:'⚔️',desc:'剑圣之家',b:{atk:5,def:5}},
+  {name:'天府公会',icon:'🏯',desc:'蜀地豪强',b:{hp:10}},
+  {name:'山海公会',icon:'⛰️',desc:'只问实力',b:{def:8}}
+];
+
+const SLOTS=[
+  {id:'weapon',name:'武器',icon:'⚔️'},{id:'helmet',name:'头盔',icon:'⛑️'},{id:'armor',name:'铠甲',icon:'🥋'},
+  {id:'boots',name:'靴子',icon:'👢'},{id:'bracer',name:'护腕',icon:'🦾'},{id:'bracelet',name:'手镯',icon:'📿'},
+  {id:'ring',name:'戒指',icon:'💍'},{id:'necklace',name:'项链',icon:'🔱'}
+];
+
+const BASE_NAMES={
+  weapon:['长剑','巨剑','战斧','长枪','法杖','短弓','匕首','拳套','太刀','战锤','刺剑','镰刀'],
+  helmet:['头盔','面具','兜帽','王冠','头冠'],armor:['铠甲','长袍','皮甲','战衣','胸甲'],
+  boots:['靴子','长靴','战靴','踏云履'],bracer:['护腕','臂甲','手甲','腕轮'],
+  bracelet:['手镯','护符','灵珠'],ring:['戒指','指环','印戒'],necklace:['项链','吊坠','颈饰','圣徽']
+};
+
+const SLOT_STATS={weapon:{atk:1,crit:0.25},helmet:{hp:1.4,def:0.8},armor:{hp:1.8,def:1.1},boots:{spd:1,def:0.5},bracer:{atk:0.4,def:0.7},bracelet:{mp:1.2,hp:0.6},ring:{atk:0.6,crit:0.6},necklace:{mp:1,hp:1}};
+
+const STAT_KEYS=['hp','mp','atk','def','spd','crit'];
+const STAT_LABELS={hp:'生命',mp:'斗气',atk:'攻击',def:'防御',spd:'速度',crit:'暴击'};
+
+let S=null,B=null;
+let UI={tab:'explore',region:0,classSel:null,originSel:'julius',notif:'',creating:true,shopTab:'potion'};
+let notifTimer=null;
+
+// ================= 社交状态 =================
+let social={
+  friends:[],
+  requests:[],
+  leaderboard:[],
+  chatFriend:null,
+  chatMessages:[],
+  chatUnsub:null,
+  online:false,
+  listenersStarted:false
+};
+
+function socialReady(){ return !!(window.FB && window.MY_UID); }
+
+function notify(msg){UI.notif=msg;const el=document.getElementById('notif');if(el){el.textContent=msg;el.style.display='block';}clearTimeout(notifTimer);notifTimer=setTimeout(()=>{UI.notif='';const e=document.getElementById('notif');if(e)e.style.display='none';},2200);}
+function save(){try{localStorage.setItem('holycrown_save',JSON.stringify(S));}catch(e){}}
+
+function load(){
+  try{
+    const d=localStorage.getItem('holycrown_save');
+    if(d){
+      S=JSON.parse(d);
+      if(!S.skillbooks)S.skillbooks=[];
+      if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0};
+      if(!S.shards)S.shards=0;
+      if(!S.titles)S.titles=[];
+      if(!S.inv)S.inv=[];
+      if(!S.weaponStock)S.weaponStock=[];
+      if(!S.equip)S.equip={weapon:null,helmet:null,armor:null,boots:null,bracer:null,bracelet:null,ring:null,necklace:null};
+      if(S.adv===undefined)S.adv=null;
+      if(S.sub===undefined)S.sub=null;
+      if(S.crown===undefined)S.crown=null;
+      if(S.guild===undefined)S.guild=null;
+      if(!S.guildLv)S.guildLv=1;
+      if(!S.contrib)S.contrib=0;
+      if(!S.mode)S.mode='online';
+      UI.creating=false;
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
+
+function playerStats(){
+  const c=CLASSES[S.cls],L=S.level;
+  let st={hp:c.hp+c.hpG*(L-1),mp:c.mp+c.mpG*(L-1),atk:c.atk+c.atkG*(L-1),def:c.def+c.defG*(L-1),spd:c.spd+c.spdG*(L-1),crit:c.crit};
+  const o=ORIGINS[S.origin].bonus;
+  if(o.hpMul)st.hp*=o.hpMul;if(o.atkMul)st.atk*=o.atkMul;if(o.defMul)st.def*=o.defMul;if(o.critMul)st.crit*=o.critMul;
+  if(S.adv){const a=CLASSES[S.cls].adv.find(x=>x.n===S.adv);if(a){if(a.hpMul)st.hp*=a.hpMul;if(a.mpMul)st.mp*=a.mpMul;if(a.atkMul)st.atk*=a.atkMul;if(a.defMul)st.def*=a.defMul;if(a.spdMul)st.spd*=a.spdMul;if(a.critMul)st.crit*=a.critMul;}}
+  for(const k in S.equip){const e=S.equip[k];if(!e)continue;for(const s of STAT_KEYS)if(e[s])st[s]+=e[s];}
+  if(S.crown){const cr=CROWNS.find(x=>x.name===S.crown.name);if(cr)for(const s in cr.b)st[s]=(st[s]||0)*(1+cr.b[s]/100);}
+  for(const t of S.titles){const td=TITLES.find(x=>x.name===t);if(td&&td.b)for(const s in td.b)st[s]=(st[s]||0)+td.b[s];}
+  if(S.guild){const g=GUILDS.find(x=>x.name===S.guild);if(g)for(const s in g.b)st[s]=(st[s]||0)+g.b[s]*(1+S.guildLv*0.5);}
+  for(const s in st)st[s]=Math.round(st[s]);
+  return st;
+}
+
+function calcPower(){
+  const p=playerStats();
+  return p.atk*10+p.hp+p.def*5+p.spd*5+Math.round(p.crit*20);
+}
+
+function expNeed(lv){return Math.floor(50*Math.pow(lv,1.4));}
+function syncVitals(){const p=playerStats();S.hp=clamp(S.hp,0,p.hp);S.mp=clamp(S.mp,0,p.mp);}
+
+function genEquip(slot,ilvl,rarIdx,classReq){
+  const rar=rarIdx!==undefined?rarIdx:Math.min(8,Math.floor(Math.random()*Math.random()*9));
+  const mul=RAR[rar].m,statDef=SLOT_STATS[slot];
+  const item={id:'it'+Date.now()+Math.random(),slot,rar,lvl:Math.max(1,Math.round(ilvl)),name:''};
+  for(const s in statDef){let base=(3+ilvl*1.15)*statDef[s]*mul*rf(0.85,1.15);if(s==='crit')base*=0.35;item[s]=Math.max(1,Math.round(base));}
+  const prefix=['','青铜','白银','黄金','史诗','遗迹','传说','神话','三日月'][rar];
+  const baseName=pick(BASE_NAMES[slot]);
+  const suffix=['','·之刃','·的守望','·裁决','·序曲','·残响','·终焉','·圣痕','·神谕'][rar];
+  item.name=(prefix?prefix+'·':'')+baseName+suffix;
+  if(slot==='weapon')item.reqClass=classReq||null;
+  return item;
+}
+
+function canEquip(it){
+  if(!it||!it.reqClass)return true;
+  const reqs=Array.isArray(it.reqClass)?it.reqClass:[it.reqClass];
+  if(reqs.includes(S.cls))return true;
+  if(S.sub&&reqs.includes(S.sub))return true;
+  return false;
+}
+function reqLabel(it){
+  if(!it.reqClass)return '通用';
+  const reqs=Array.isArray(it.reqClass)?it.reqClass:[it.reqClass];
+  return reqs.map(k=>CLASSES[k]?CLASSES[k].name:k).join('/');
+}
+function randomWeaponReq(){return Math.random()<0.4?null:pick(CLASS_KEYS);}
+
+function genShopWeapon(){
+  const lv=clamp(S.level+rnd(-3,5),1,160);
+  const r=Math.random();
+  let rar;
+  if(r<0.35)rar=rnd(0,2);
+  else if(r<0.65)rar=rnd(2,4);
+  else if(r<0.88)rar=rnd(4,6);
+  else rar=rnd(6,8);
+  const req=randomWeaponReq();
+  const it=genEquip('weapon',lv,rar,req);
+  it.shopPrice=Math.round((40+lv*18)*RAR[rar].m*rf(0.9,1.2));
+  return it;
+}
+function refreshWeaponStock(){
+  S.weaponStock=[];
+  const n=rnd(4,5);
+  for(let i=0;i<n;i++)S.weaponStock.push(genShopWeapon());
+}
+function ensureWeaponStock(){
+  if(!S.weaponStock)S.weaponStock=[];
+  if(S.weaponStock.length===0)refreshWeaponStock();
+}
+
+function equipItem(idx){
+  const it=S.inv[idx];if(!it)return;
+  if(it.slot==='weapon'&&!canEquip(it)){notify('职业不符，无法装备');return;}
+  const old=S.equip[it.slot];S.equip[it.slot]=it;S.inv.splice(idx,1);if(old)S.inv.push(old);
+  syncVitals();save();render();
+  if(window.syncMyProfile)syncMyProfile();
+  notify('已装备 '+it.name);
+}
+function sellItem(idx){const it=S.inv[idx];if(!it)return;const price=Math.round((10+it.lvl*8)*RAR[it.rar].m);S.gold+=price;S.inv.splice(idx,1);save();render();notify('出售获得 '+fmt(price)+' CC');}
+
+function statLine(it){return STAT_KEYS.filter(k=>it[k]).map(k=>STAT_LABELS[k]+'+'+it[k]).join('　');}
+function statCompare(it){
+  const cur=S.equip[it.slot];
+  return STAT_KEYS.map(k=>{
+    const nv=it[k]||0,ov=cur?(cur[k]||0):0,diff=nv-ov;
+    if(nv===0&&(!cur||ov===0))return '';
+    let s='<span style="display:inline-block;margin-right:12px;white-space:nowrap">'+STAT_LABELS[k]+' '+(nv>0?'+'+nv:'0');
+    if(cur&&diff!==0){if(diff>0)s+=' <span style="color:#7fd4a0;font-weight:bold">▲+'+diff+'</span>';else s+=' <span style="color:#e88a7a;font-weight:bold">▼'+Math.abs(diff)+'</span>';}
+    s+='</span>';
+    return s;
+  }).join('');
+}
+function equipScore(it){return (it.hp||0)*0.5+(it.mp||0)*0.3+(it.atk||0)*2+(it.def||0)*1.5+(it.spd||0)*1.5+(it.crit||0)*3;}
+
+function makeEnemy(name,lv,isBoss){
+  const bmHp=isBoss?1.8:1,bmAtk=isBoss?2.4:1,bmDef=isBoss?1.15:1;
+  const e={name,lv,maxHp:Math.round((40+lv*20+lv*lv*0.55)*bmHp*rf(0.92,1.08)),atk:Math.round((5+lv*2.2)*bmAtk*rf(0.92,1.08)),def:Math.round((3+lv*1.5)*bmDef*rf(0.9,1.1)),spd:Math.round((6+lv*1.2)*rf(0.9,1.1)),isBoss};
+  e.hp=e.maxHp;
+  return e;
+}
+function enemyExp(e){return Math.round((10+e.lv*10+e.lv*e.lv*0.5)*(e.isBoss?2.5:1));}
+function enemyGold(e){return Math.round((8+e.lv*5+e.lv*e.lv*0.2)*(e.isBoss?3:1));}
+
+function getSkills(){
+  const list=[...CLASSES[S.cls].skills];
+  if(S.adv){const a=CLASSES[S.cls].adv.find(x=>x.n===S.adv);if(a&&a.skill)list.push(a.skill);}
+  if(S.sub){const sub=CLASSES[S.sub];if(sub)list.push({...sub.skills[0],n:'[副]'+sub.skills[0].n});}
+  if(S.skillbooks&&SKILLBOOKS[S.cls]){for(const b of SKILLBOOKS[S.cls]){if(S.skillbooks.includes(b.id))list.push({...b,n:'[书]'+b.n});}}
+  return list;
+}
+
+function startBattle(enemy,opts){
+  opts=opts||{};
+  B={enemy,log:[],over:false,busy:false,turn:0,defBuff:0,defBuffTurns:0,eDefDown:0,dungeon:opts.dungeon||null,isDungeon:!!opts.dungeon,reward:{exp:0,gold:0,items:[],shards:0},status:{bleed:0,burn:0,freeze:0,stun:0},bossTurn:0};
+  B.log.push({t:'sys',m:'⚔ 遭遇 '+enemy.name+'（Lv.'+enemy.lv+'）'+(enemy.isBoss?' 👑BOSS':'')});
+  render();
+}
+
+function calcDmg(atk,def,mul,critRate,opts){
+  opts=opts||{};
+  const defFactor=opts.defFactor!==undefined?opts.defFactor:0.3;
+  const spread=opts.spread!==undefined?opts.spread:0.08;
+  const minMul=opts.minMul!==undefined?opts.minMul:0.15;
+  let base=atk*mul-def*defFactor;
+  base=Math.max(base,atk*minMul);
+  const isCrit=Math.random()*100<(critRate||0);
+  let dmg=base*rf(1-spread,1+spread)*(isCrit?1.85:1);
+  return {dmg:Math.max(1,Math.round(dmg)),crit:isCrit};
+}
+
+function applyBuff(sk){
+  if(sk.n.includes('铁壁')){B.defBuff=0.6;B.defBuffTurns=3;}
+  else if(sk.n.includes('坚守')){B.defBuff=1;B.defBuffTurns=3;}
+  else if(sk.n.includes('不动')||sk.n.includes('不灭')){B.defBuff=1.5;B.defBuffTurns=3;}
+  else if(sk.n.includes('圣盾')||sk.n.includes('圣枪')||sk.n.includes('神恩')){B.defBuff=1.2;B.defBuffTurns=3;}
+  else if(sk.n.includes('改造')){B.atkBuff=1;B.atkBuffTurns=3;}
+  else if(sk.n.includes('钢铁')){B.defBuff=1;B.defBuffTurns=2;}
+  else if(sk.n.includes('鹰眼')||sk.n.includes('心眼')||sk.n.includes('隐身')){B.critBuff=1;B.critBuffTurns=2;}
+  else {B.defBuff=0.8;B.defBuffTurns=2;}
+}
+
+async function useSkill(idx){
+  if(!B||B.over||B.busy)return;
+  B.busy=true;
+  const p=playerStats();
+  const skills=getSkills();
+  const sk=skills[idx];
+  if(!sk){B.busy=false;return;}
+  if(sk.mp>S.mp){notify('斗气不足！');B.busy=false;return;}
+  S.mp-=sk.mp;
+  const e=B.enemy;
+
+  if(sk.t==='buff'){
+    applyBuff(sk);
+    B.log.push({t:'sys',m:'你使用了「'+sk.n+'」，状态提升！'});
+    render();await sleep(420);
+  } else if(sk.t==='heal'){
+    const heal=Math.round(p.atk*sk.mul+rf(0.9,1.1)*p.hp*0.05);
+    S.hp=Math.min(p.hp,S.hp+heal);
+    B.log.push({t:'heal',m:'✨ '+sk.n+' 恢复了 '+fmt(heal)+' 点生命'});
+    render();await sleep(420);
+  } else if(sk.t==='mana'){
+    const mana=Math.round(p.mp*sk.mul);
+    S.mp=Math.min(p.mp,S.mp+mana);
+    B.log.push({t:'heal',m:'💠 '+sk.n+' 恢复了 '+fmt(mana)+' 点斗气'});
+    render();await sleep(420);
+  } else {
+    const hits=sk.hits||1;
+    let total=0,anyCrit=false;
+    const critRate=p.crit+(B.critBuff?100:0);
+    for(let i=0;i<hits;i++){
+      const r=calcDmg(p.atk*(1+(B.atkBuff||0)),e.def*(1-B.eDefDown),sk.mul,critRate);
+      total+=r.dmg;anyCrit=anyCrit||r.crit;
+      await sleep(120);
+    }
+    e.hp-=total;
+    if(sk.n.includes('腐蚀'))B.eDefDown=Math.min(0.5,B.eDefDown+0.25);
+    B.log.push({t:anyCrit?'crit':'dmg',m:(anyCrit?'💥 暴击！':'')+sk.n+' 对 '+e.name+' 造成 '+fmt(total)+' 点伤害'+(hits>1?'（'+hits+'段）':'')});
+    render();await sleep(420);
+  }
+
+  if(e.hp<=0){await winBattle();return;}
+
+  await sleep(260);
+  B.turn++;
+  if(B.defBuffTurns>0){B.defBuffTurns--;if(B.defBuffTurns===0)B.defBuff=0;}
+  if(B.atkBuffTurns>0){B.atkBuffTurns--;if(B.atkBuffTurns===0)B.atkBuff=0;}
+  if(B.critBuffTurns>0){B.critBuffTurns--;if(B.critBuffTurns===0)B.critBuff=0;}
+
+  await enemyTurn();
+}
+
+async function enemyTurn(){
+  if(!B||B.over)return;
+  const e=B.enemy;
+  const p=playerStats();
+  const pDef=p.def*(1+B.defBuff);
+
+  B.bossTurn++;
+  const useBossSkill=e.isBoss&&B.bossTurn%3===0;
+
+  if(useBossSkill){
+    const sk=pick(BOSS_SKILLS);
+    const eOpts={defFactor:0.05,spread:0.20,minMul:0.35};
+    const er=calcDmg(e.atk,0,sk.mul,10,eOpts);
+    S.hp-=er.dmg;
+    B.log.push({t:'skill',m:'👑 '+e.name+' 释放「'+sk.n+'」！造成 '+fmt(er.dmg)+' 点伤害'});
+    if(sk.effect==='bleed'){B.status.bleed=sk.turns;B.log.push({t:'sys',m:'🩸 你陷入了流血状态（'+sk.turns+'回合）'});}
+    if(sk.effect==='burn'){B.status.burn=sk.turns;B.log.push({t:'sys',m:'🔥 你陷入了灼烧状态（'+sk.turns+'回合）'});}
+    if(sk.effect==='freeze'){B.status.freeze=sk.turns;B.log.push({t:'sys',m:'❄️ 你被冰冻了（'+sk.turns+'回合）'});}
+    if(sk.effect==='stun'){B.status.stun=sk.turns;B.log.push({t:'sys',m:'💫 你被眩晕了（'+sk.turns+'回合）'});}
+    if(sk.effect==='drain'){const drain=Math.round(er.dmg*0.5);B.enemy.hp=Math.min(B.enemy.maxHp,B.enemy.hp+drain);B.log.push({t:'sys',m:'💉 '+e.name+' 恢复了 '+drain+' 点生命'});}
+    render();await sleep(600);
+  } else {
+    const eOpts=e.isBoss?{defFactor:0.05,spread:0.20,minMul:0.35}:undefined;
+    const er=calcDmg(e.atk,pDef,1,e.isBoss?10:5,eOpts);
+    S.hp-=er.dmg;
+    B.log.push({t:'dmg',m:e.name+' 发起攻击，造成 '+fmt(er.dmg)+' 点伤害'+(er.crit?'（暴击）':'')});
+    render();await sleep(400);
+  }
+
+  if(S.hp<=0){await loseBattle();return;}
+
+  if(B.status.bleed>0){
+    const dmg=Math.round(e.atk*0.3);
+    S.hp-=dmg;B.status.bleed--;
+    B.log.push({t:'dmg',m:'🩸 流血造成 '+dmg+' 点伤害（剩余'+B.status.bleed+'回合）'});
+    if(S.hp<=0){await loseBattle();return;}
+  }
+  if(B.status.burn>0){
+    const dmg=Math.round(e.atk*0.4);
+    S.hp-=dmg;B.status.burn--;
+    B.log.push({t:'dmg',m:'🔥 灼烧造成 '+dmg+' 点伤害（剩余'+B.status.burn+'回合）'});
+    if(S.hp<=0){await loseBattle();return;}
+  }
+  if(B.status.freeze>0){B.log.push({t:'sys',m:'❄️ 冰冻中（剩余'+B.status.freeze+'回合）'});B.status.freeze--;}
+  if(B.status.stun>0){B.log.push({t:'sys',m:'💫 眩晕中（剩余'+B.status.stun+'回合）'});B.status.stun--;}
+
+  B.busy=false;
+  save();render();
+}
+
+function usePotion(type){
+  if(!B||B.over||B.busy)return;
+  if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0};
+  const qty=S.potions[type]||0;
+  if(qty<=0){notify('药水不足');return;}
+  const p=playerStats();
+  S.potions[type]--;
+  if(type==='hp'){const heal=Math.round(p.hp*0.3);S.hp=Math.min(p.hp,S.hp+heal);B.log.push({t:'heal',m:'🩸 使用生命药水，恢复 '+heal+' 生命'});}
+  else if(type==='hpBig'){const heal=Math.round(p.hp*0.6);S.hp=Math.min(p.hp,S.hp+heal);B.log.push({t:'heal',m:'💗 使用高级生命药水，恢复 '+heal+' 生命'});}
+  else if(type==='mp'){const heal=Math.round(p.mp*0.5);S.mp=Math.min(p.mp,S.mp+heal);B.log.push({t:'heal',m:'💠 使用斗气药水，恢复 '+heal+' 斗气'});}
+  else if(type==='ultimate'){const hh=Math.round(p.hp*0.4),hm=Math.round(p.mp*0.4);S.hp=Math.min(p.hp,S.hp+hh);S.mp=Math.min(p.mp,S.mp+hm);B.log.push({t:'heal',m:'🌟 使用万能药水，恢复 '+hh+' 生命 '+hm+' 斗气'});}
+  save();render();
+}
+
+async function winBattle(){
+  B.over=true;
+  const e=B.enemy,p=playerStats();
+  let exp=enemyExp(e);if(S.mode==='single')exp=Math.round(exp*1.2);
+  let gold=enemyGold(e);const gm=ORIGINS[S.origin].bonus.goldMul||1;gold=Math.round(gold*gm);
+  S.exp+=exp;S.gold+=gold;
+  B.reward.exp=exp;B.reward.gold=gold;
+  B.log.push({t:'win',m:'✦ 击败 '+e.name+'！获得 '+fmt(exp)+' 经验、'+fmt(gold)+' CC'});
+  const dropCount=e.isBoss?rnd(2,3):(Math.random()<0.45?1:0);
+  for(let i=0;i<dropCount;i++){
+    if(S.inv.length>=40){B.log.push({t:'sys',m:'背包已满'});break;}
+    const it=genEquip(pick(SLOTS).id,e.lv,Math.min(8,Math.max(0,Math.floor(e.lv/18)+rnd(0,2))));
+    S.inv.push(it);B.reward.items.push(it);
+    B.log.push({t:'win',m:'📦 获得装备：'+it.name});
+  }
+  if(e.isBoss&&Math.random()<0.5){S.shards=(S.shards||0)+1;B.reward.shards=1;B.log.push({t:'win',m:'✧ 获得「圣冠碎片」×1'});}
+  S.kills++;checkTitles();levelUpCheck();
+  if(S.crown){S.crown.days--;if(S.crown.days<=0){B.log.push({t:'sys',m:'⚠ 「'+S.crown.name+'」已失效'});S.crown=null;}}
+  S.day++;B.busy=false;save();render();
+  if(window.syncMyProfile)syncMyProfile();
+}
+
+async function loseBattle(){
+  B.over=true;
+  B.log.push({t:'lose',m:'✝ 你倒下了…'});
+  S.deaths++;
+  let lost=[];
+  if(S.level>1){S.level--;S.exp=Math.floor(expNeed(S.level)*0.3);B.log.push({t:'lose',m:'等级下降至 Lv.'+S.level});}
+  const pool=S.inv.slice();
+  for(const k in S.equip)if(S.equip[k])pool.push({__eq:k,it:S.equip[k]});
+  const dropN=Math.min(pool.length,rnd(1,2));
+  for(let i=0;i<dropN;i++){
+    if(pool.length===0)break;
+    const idx=Math.floor(Math.random()*pool.length);const p=pool.splice(idx,1)[0];
+    if(p.__eq){lost.push(p.it.name);S.equip[p.__eq]=null;}
+    else{lost.push(p.name);const j=S.inv.indexOf(p);if(j>=0)S.inv.splice(j,1);}
+  }
+  if(lost.length)B.log.push({t:'lose',m:'💔 遗失了：'+lost.join('、')});
+  S.hp=1;S.mp=0;B.busy=false;save();render();
+  if(window.syncMyProfile)syncMyProfile();
+}
+
+function levelUpCheck(){
+  let leveled=false;
+  while(S.level<160&&S.exp>=expNeed(S.level)){S.exp-=expNeed(S.level);S.level++;leveled=true;}
+  if(leveled){
+    const p=playerStats();S.hp=p.hp;S.mp=p.mp;
+    B.log.push({t:'win',m:'▲ 升级！当前等级 Lv.'+S.level});
+    if(S.level>=30&&!S.adv)B.log.push({t:'sys',m:'✦ 你已达到30级，可进行职业进阶！'});
+    if(S.level>=60&&!S.sub)B.log.push({t:'sys',m:'✦ 你已达到60级，可选择副职业！'});
+    if(window.syncMyProfile)syncMyProfile();
+  }
+}
+
+function checkTitles(){
+  const add=t=>{if(!S.titles.includes(t)){S.titles.push(t);if(B)B.log.push({t:'win',m:'🏆 获得称号：「'+t+'」'});else notify('获得称号：「'+t+'」');}};
+  if(S.level>=10)add('初出茅庐');if(S.level>=30)add('边境行者');if(S.level>=60)add('沙场老将');
+  if(S.level>=100)add('传说之人');if(S.level>=150)add('圣域守护者');if(S.kills>=100)add('弑神者');
+}
+
+function flee(){
+  if(!B||B.over||B.busy)return;
+  const p=playerStats();
+  const chance=clamp(0.4+(p.spd-B.enemy.spd)*0.02,0.15,0.9);
+  if(Math.random()<chance){B.log.push({t:'sys',m:'你成功脱离了战斗。'});B.over=true;B.busy=false;render();}
+  else{B.log.push({t:'sys',m:'逃跑失败！'});B.busy=true;render();
+    setTimeout(()=>{if(!B||B.over)return;const e=B.enemy;const eOpts=e.isBoss?{defFactor:0.05,spread:0.20,minMul:0.35}:undefined;const er=calcDmg(e.atk,p.def,1,e.isBoss?10:5,eOpts);S.hp-=er.dmg;B.log.push({t:'dmg',m:e.name+' 追击，造成 '+fmt(er.dmg)+' 点伤害'});if(S.hp<=0){loseBattle();}else{B.busy=false;render();}},500);
+  }
+}
+
+function explore(){
+  const reg=REGIONS[UI.region];const roll=Math.random();
+  if(roll<0.72){const center=clamp(S.level,reg.min,reg.max);const lv=clamp(center+rnd(-2,3),1,160);startBattle(makeEnemy(pick(reg.enemies),lv,false));}
+  else if(roll<0.86){const avgLv=(reg.min+reg.max)/2;const g=Math.round((10+avgLv*7)*rf(0.8,1.4));S.gold+=g;S.day++;save();render();notify('💰 发现 '+fmt(g)+' CC');}
+  else if(roll<0.96){if(S.inv.length>=40){notify('背包已满');return;}const avgLv=(reg.min+reg.max)/2;const it=genEquip(pick(SLOTS).id,Math.round(avgLv));S.inv.push(it);S.day++;save();render();notify('📦 拾获 '+it.name);}
+  else{S.day++;save();render();notify('风平浪静…');}
+}
+
+function enterDungeon(idx){const d=DUNGEONS[idx];if(S.level<Math.max(1,d.lv-5)){notify('等级不足');return;}startBattle(makeEnemy(d.boss,d.lv+rnd(0,2),true),{dungeon:d});}
+
+function bar(cur,max,cls){const pct=max>0?clamp(cur/max*100,0,100):0;return '<div class="bar"><div class="'+cls+'" style="width:'+pct+'%"></div><span>'+fmt(Math.max(0,cur))+' / '+fmt(max)+'</span></div>';}
+
+// ================= Firebase 同步与监听 =================
+async function syncMyProfile(){
+  if(!socialReady()||!S)return;
+  try{
+    const profile={
+      name:S.name,
+      level:S.level,
+      power:calcPower(),
+      cls:S.cls,
+      adv:S.adv||CLASSES[S.cls].name,
+      online:true,
+      updatedAt:FB.serverTimestamp()
+    };
+    await FB.set(FB.ref(FB.db,'users/'+MY_UID),profile);
+    await FB.set(FB.ref(FB.db,'leaderboard/'+MY_UID),profile);
+    social.online=true;
+  }catch(e){console.warn('sync profile failed',e);}
+}
+window.syncMyProfile=syncMyProfile;
+
+function startSocialListeners(){
+  if(!socialReady()||social.listenersStarted)return;
+  social.listenersStarted=true;
+
+  FB.onValue(FB.ref(FB.db,'friendRequests/'+MY_UID),snap=>{
+    social.requests=[];
+    snap.forEach(c=>social.requests.push({uid:c.key,...c.val()}));
+    if(UI.tab==='social'&&!B)render();
+  });
+
+  FB.onValue(FB.ref(FB.db,'friends/'+MY_UID),async snap=>{
+    const uids=[];
+    snap.forEach(c=>uids.push(c.key));
+    const list=[];
+    for(const uid of uids){
+      try{
+        const s=await FB.get(FB.ref(FB.db,'users/'+uid));
+        if(s.exists())list.push({uid,...s.val()});
+        else list.push({uid,name:'（未知玩家）',level:0,power:0,online:false});
+      }catch(e){}
+    }
+    social.friends=list;
+    if(UI.tab==='social'&&!B)render();
+  });
+
+  const q=FB.query(FB.ref(FB.db,'leaderboard'),FB.orderByChild('power'),FB.limitToLast(50));
+  FB.onValue(q,snap=>{
+    social.leaderboard=[];
+    snap.forEach(c=>social.leaderboard.push({uid:c.key,...c.val()}));
+    social.leaderboard.reverse();
+    if(UI.tab==='social'&&!B)render();
+  });
+
+  syncMyProfile();
+}
+
+// 轮询等待 Firebase 就绪
+function waitForFirebase(attempt){
+  attempt=attempt||0;
+  if(socialReady()){
+    startSocialListeners();
+    if(UI.tab==='social'&&!B)render();
+    return;
+  }
+  if(attempt>40)return;
+  setTimeout(()=>waitForFirebase(attempt+1),500);
+}
+
+async function sendFriendRequest(targetUid){
+  if(!socialReady()){notify('未连接服务器');return;}
+  if(!targetUid||targetUid===MY_UID){notify('请输入有效的 UID');return;}
+  try{
+    const s=await FB.get(FB.ref(FB.db,'users/'+targetUid));
+    if(!s.exists()){notify('该 UID 不存在');return;}
+    await FB.set(FB.ref(FB.db,'friendRequests/'+targetUid+'/'+MY_UID),{name:S.name,at:Date.now()});
+    notify('好友请求已发送');
+  }catch(e){notify('发送失败：'+e.message);}
+}
+
+async function acceptFriend(fromUid){
+  if(!socialReady())return;
+  try{
+    await FB.set(FB.ref(FB.db,'friends/'+MY_UID+'/'+fromUid),true);
+    await FB.set(FB.ref(FB.db,'friends/'+fromUid+'/'+MY_UID),true);
+    await FB.remove(FB.ref(FB.db,'friendRequests/'+MY_UID+'/'+fromUid));
+    notify('已添加好友');
+  }catch(e){notify('操作失败');}
+}
+
+function chatRoomId(a,b){return [a,b].sort().join('_');}
+
+function openChat(friendUid){
+  if(!socialReady())return;
+  if(social.chatUnsub){social.chatUnsub();social.chatUnsub=null;}
+  social.chatFriend=friendUid;
+  social.chatMessages=[];
+  const room=chatRoomId(MY_UID,friendUid);
+  const unsub=FB.onValue(FB.ref(FB.db,'chats/'+room),snap=>{
+    const msgs=[];
+    snap.forEach(c=>msgs.push(c.val()));
+    msgs.sort((a,b)=>a.at-b.at);
+    social.chatMessages=msgs;
+    if(UI.tab==='social'&&!B)render();
+    setTimeout(()=>{const el=document.getElementById('chatBox');if(el)el.scrollTop=el.scrollHeight;},50);
+  });
+  social.chatUnsub=()=>unsub();
+}
+
+async function sendChatMessage(text){
+  if(!text||!text.trim()||!social.chatFriend)return;
+  const room=chatRoomId(MY_UID,social.chatFriend);
+  try{
+    await FB.push(FB.ref(FB.db,'chats/'+room),{from:MY_UID,text:text.trim(),at:Date.now()});
+  }catch(e){notify('发送失败');}
+}
+
+// ================= 社交页面 =================
+function renderSocial(){
+  if(!socialReady()){
+    return `<div class="card center">
+      <div class="small">正在连接服务器…</div>
+      <div class="small" style="margin-top:8px">若长时间无响应，请检查 Firebase 配置及是否已启用匿名登录。</div>
+    </div>`;
+  }
+
+  const myPower=calcPower();
+  const onlineCount=social.friends.filter(f=>f.online).length;
+  const chatFriendData=social.chatFriend?social.friends.find(f=>f.uid===social.chatFriend):null;
+
+  return `
+  <div class="card">
+    <div class="row"><span class="k">我的名字</span><span class="v">${S.name}</span></div>
+    <div class="row"><span class="k">等级 / 战力</span><span class="v">Lv.${S.level} · ${fmt(myPower)}</span></div>
+    <div class="row"><span class="k">在线好友</span><span class="v">${onlineCount} / ${social.friends.length}</span></div>
+    <div style="margin-top:8px">
+      <div class="small" style="margin-bottom:4px">我的 UID（发给朋友添加你）</div>
+      <div style="display:flex;gap:6px">
+        <input id="myUidBox" value="${MY_UID}" readonly style="font-size:11px;font-family:monospace">
+        <button onclick="navigator.clipboard.writeText('${MY_UID}');notify('已复制 UID')" style="padding:8px 12px;white-space:nowrap">复制</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-bottom:8px">添加好友</h3>
+    <div style="display:flex;gap:6px">
+      <input id="friendUidInput" placeholder="粘贴对方 UID…" style="font-size:12px">
+      <button onclick="sendFriendRequest(document.getElementById('friendUidInput').value.trim())" style="padding:8px 12px;white-space:nowrap">发送请求</button>
+    </div>
+  </div>
+
+  ${social.requests.length?`
+  <div class="card">
+    <h3 style="margin-bottom:8px">待处理请求（${social.requests.length}）</h3>
+    ${social.requests.map(r=>`
+      <div class="item">
+        <span class="iname"><span class="hl">${r.name||r.uid.slice(0,8)}</span> <span class="small">请求加你为好友</span></span>
+        <button onclick="acceptFriend('${r.uid}')" style="padding:4px 10px;font-size:11px">接受</button>
+      </div>`).join('')}
+  </div>`:''}
+
+  <div class="card">
+    <h3 style="margin-bottom:8px">好友列表（${social.friends.length}）</h3>
+    ${social.friends.length?social.friends.map(f=>`
+      <div class="item">
+        <span class="dot" style="background:${f.online?'#4a7c59':'#5a3a3a'}"></span>
+        <span class="iname">
+          <span class="hl">${f.name}</span>
+          <span class="small">Lv.${f.level} · 战力 ${fmt(f.power||0)} · ${f.adv||''}</span>
+        </span>
+        <button onclick="openChat('${f.uid}')" style="padding:4px 10px;font-size:11px">聊天</button>
+      </div>`).join(''):'<div class="small">还没有好友，把你的 UID 发给朋友吧。</div>'}
+  </div>
+
+  ${social.chatFriend?`
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h3>💬 ${chatFriendData?chatFriendData.name:'好友'}</h3>
+      <button onclick="social.chatFriend=null;social.chatMessages=[];if(social.chatUnsub){social.chatUnsub();social.chatUnsub=null;}render()" style="padding:4px 10px;font-size:11px">关闭</button>
+    </div>
+    <div id="chatBox" class="chat-box">
+      ${social.chatMessages.length?social.chatMessages.map(m=>`
+        <div class="chat-msg ${m.from===MY_UID?'me':'other'}">
+          <span class="chat-bubble">${escapeHtml(m.text)}</span>
+        </div>`).join(''):'<div class="small">还没有消息</div>'}
+    </div>
+    <div style="display:flex;gap:6px">
+      <input id="chatInput" placeholder="输入消息…" style="font-size:12px" onkeydown="if(event.key==='Enter'){sendChatMessage(this.value);this.value=''}">
+      <button onclick="const i=document.getElementById('chatInput');sendChatMessage(i.value);i.value=''" style="padding:8px 12px;white-space:nowrap">发送</button>
+    </div>
+  </div>`:''}
+
+  <div class="card">
+    <h3 style="margin-bottom:8px">🏆 全服排行榜 Top 50</h3>
+    ${social.leaderboard.length?social.leaderboard.map((u,i)=>{
+      const isMe=u.uid===MY_UID;
+      return `<div class="row">
+        <span class="k" style="${i<3?'color:#ffd700':''}">${i+1}. ${isMe?'<span class="hl">'+escapeHtml(u.name)+'（你）</span>':escapeHtml(u.name)}</span>
+        <span class="v small">Lv.${u.level} · 战力 ${fmt(u.power||0)}</span>
+      </div>`;
+    }).join(''):'<div class="small">暂无数据</div>'}
+  </div>`;
+}
+
+function escapeHtml(s){
+  return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ================= 页面渲染 =================
+function renderTitle(){
+  return `<div class="title-screen">
+    <h1>圣 冠</h1>
+    <div class="subtitle">H O L Y &nbsp; C R O W N</div>
+    <div class="card" style="max-width:620px;margin:0 auto 20px;text-align:left">
+      <p style="color:#8a7a60;font-size:13px;line-height:1.9">
+        暗鸦掠过铁荆棘王旗，黄庭星轨在天穹断裂。<br>
+        深渊传来旧神低语，青金石瞳孔映出三日月缺。<br>
+        <span style="color:var(--gold)">—— 血与铁构成十二圣冠，为新王奉献皇冕。</span>
+      </p>
+    </div>
+    <div class="flex" style="max-width:420px;margin:0 auto">
+      <button data-act="newgame" style="font-size:16px;padding:14px">开 始 冒 险</button>
+      <button data-act="loadgame" style="font-size:16px;padding:14px">读 取 存 档</button>
+    </div>
+  </div>`;
+}
+
+function renderCreate(){
+  const clsList=Object.values(CLASSES);const sel=UI.classSel?CLASSES[UI.classSel]:null;
+  return `<div class="card">
+    <h2 style="margin-bottom:12px">◇ 创 建 角 色</h2>
+    <div style="margin-bottom:12px"><div class="small">角色名</div><input id="nameInput" placeholder="输入名字…" value="${UI.name||''}" maxlength="12"></div>
+    <div style="margin-bottom:12px"><div class="small" style="margin-bottom:6px">出身</div>
+      <div class="grid" style="grid-template-columns:repeat(3,1fr)">
+        ${Object.entries(ORIGINS).map(([k,o])=>`<div class="cls-card ${UI.originSel===k?'sel':''}" data-act="origin" data-arg="${k}"><span class="ic">${o.icon}</span><div class="nm">${o.name}</div><div class="ds">${o.desc}</div></div>`).join('')}
+      </div>
+    </div>
+    <div style="margin-bottom:12px"><div class="small" style="margin-bottom:6px">初始职业</div>
+      <div class="grid">
+        ${clsList.map(c=>`<div class="cls-card ${UI.classSel===c.key?'sel':''}" data-act="class" data-arg="${c.key}"><span class="ic">${c.icon}</span><div class="nm">${c.name}</div><div class="ds">${c.desc}</div></div>`).join('')}
+      </div>
+    </div>
+    ${sel?`<div class="card" style="background:#0f0c09">
+      <div class="row"><span class="k">生命</span><span class="v">${sel.hp}</span></div>
+      <div class="row"><span class="k">斗气</span><span class="v">${sel.mp}</span></div>
+      <div class="row"><span class="k">攻击</span><span class="v">${sel.atk}</span></div>
+      <div class="row"><span class="k">防御</span><span class="v">${sel.def}</span></div>
+      <div class="row"><span class="k">速度</span><span class="v">${sel.spd}</span></div>
+      <div class="row"><span class="k">暴击</span><span class="v">${sel.crit}%</span></div>
+      <div class="small" style="margin-top:6px">技能：${sel.skills.map(s=>s.n).join(' / ')}</div>
+    </div>`:''}
+    <div class="flex" style="margin-top:14px">
+      <button data-act="back">返回</button>
+      <button data-act="begin" style="flex:2">开 始 旅 程</button>
+    </div>
+  </div>`;
+}
+
+function renderMain(){
+  const p=playerStats();const need=expNeed(S.level);const expPct=S.level>=160?100:clamp(S.exp/need*100,0,100);
+  const socialTag=socialReady()?`<span class="tag on">🌐 已连接</span>`:`<span class="tag off">⏳ 连接中</span>`;
+  return `
+  <div class="topbar">
+    <span class="pname">${S.name}</span>
+    <span class="tag">Lv.${S.level}</span>
+    <span class="tag">${CLASSES[S.cls].icon} ${S.adv||CLASSES[S.cls].name}</span>
+    <span class="tag">💰 ${fmt(S.gold)} CC</span>
+    <span class="tag">📅 第${S.day}天</span>
+    ${socialTag}
+    ${S.crown?`<span class="tag" style="border-color:#fde047;color:#fde047">👑 ${S.crown.days}天</span>`:''}
+  </div>
+  <div class="card" style="padding:10px 14px">
+    <div style="display:flex;gap:10px">
+      <div style="flex:1">${bar(S.hp,p.hp,'hpfill')}</div>
+      <div style="flex:1">${bar(S.mp,p.mp,'mpfill')}</div>
+    </div>
+    <div style="margin-top:6px">
+      <div class="small">经验 ${fmt(S.exp)} / ${fmt(need)}</div>
+      <div class="bar" style="height:8px"><div class="expfill" style="width:${expPct}%"></div></div>
+    </div>
+  </div>
+  <div class="tabs">
+    ${[['explore','探索'],['char','角色'],['inv','背包'],['dungeon','副本'],['crown','圣冠'],['guild','公会'],['shop','商店'],['social','社交']].map(([k,n])=>`<button class="${UI.tab===k?'active':''}" data-act="tab" data-arg="${k}">${n}</button>`).join('')}
+  </div>
+  <div class="card">${renderView(p)}</div>
+  <div class="center" style="margin:14px 0"><button data-act="reset" style="font-size:11px;opacity:.5">删除存档重新开始</button></div>`;
+}
+
+function renderView(p){
+  switch(UI.tab){
+    case 'explore':return renderExplore();
+    case 'char':return renderChar(p);
+    case 'inv':return renderInv(p);
+    case 'dungeon':return renderDungeon();
+    case 'crown':return renderCrown();
+    case 'guild':return renderGuild();
+    case 'shop':return renderShop(p);
+    case 'social':return renderSocial();
+    default:return '';
+  }
+}
+
+function renderExplore(){
+  const reg=REGIONS[UI.region];
+  return `<h3 style="margin-bottom:10px">${reg.icon} ${reg.name} <span class="small">（推荐 ${reg.min}-${reg.max}）</span></h3>
+  <p class="small" style="margin-bottom:10px">${reg.desc}</p>
+  <button data-act="explore" style="width:100%;padding:14px;font-size:15px;margin-bottom:12px">⚔ 探 索</button>
+  <div class="small" style="margin-bottom:6px">切换区域</div>
+  <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr))">
+    ${REGIONS.map((r,i)=>`<div class="cls-card ${UI.region===i?'sel':''}" data-act="region" data-arg="${i}" style="padding:8px"><span class="ic" style="font-size:20px">${r.icon}</span><div class="nm" style="font-size:12px">${r.name}</div><div class="ds">Lv.${r.min}-${r.max}</div></div>`).join('')}
+  </div>
+  <div style="margin-top:14px">
+    <div class="row"><span class="k">击杀</span><span class="v">${S.kills}</span></div>
+    <div class="row"><span class="k">死亡</span><span class="v">${S.deaths}</span></div>
+    <div class="row"><span class="k">圣冠碎片</span><span class="v">${S.shards||0}</span></div>
+  </div>`;
+}
+
+function renderChar(p){
+  const c=CLASSES[S.cls];const canAdv=S.level>=30&&!S.adv;const canSub=S.level>=60&&!S.sub;
+  return `<h3 style="margin-bottom:10px">${c.icon} ${S.name}</h3>
+  <div class="row"><span class="k">主职业</span><span class="v">${c.name}${S.adv?' → '+S.adv:''}</span></div>
+  <div class="row"><span class="k">副职业</span><span class="v">${S.sub?CLASSES[S.sub].name:'未选择'}</span></div>
+  <div class="row"><span class="k">出身</span><span class="v">${ORIGINS[S.origin].name}</span></div>
+  <div class="row"><span class="k">等级</span><span class="v">Lv.${S.level}/160</span></div>
+  <div class="row"><span class="k">战力</span><span class="v">${fmt(calcPower())}</span></div>
+  <hr style="border:none;border-top:1px solid var(--line);margin:10px 0">
+  <div class="row"><span class="k">生命</span><span class="v">${fmt(p.hp)}</span></div>
+  <div class="row"><span class="k">斗气</span><span class="v">${fmt(p.mp)}</span></div>
+  <div class="row"><span class="k">攻击</span><span class="v">${fmt(p.atk)}</span></div>
+  <div class="row"><span class="k">防御</span><span class="v">${fmt(p.def)}</span></div>
+  <div class="row"><span class="k">速度</span><span class="v">${fmt(p.spd)}</span></div>
+  <div class="row"><span class="k">暴击</span><span class="v">${Math.round(p.crit)}%</span></div>
+  <hr style="border:none;border-top:1px solid var(--line);margin:10px 0">
+  <h3 style="margin-bottom:8px;font-size:14px">技能</h3>
+  ${getSkills().map(s=>`<div class="row"><span class="k">${s.n}</span><span class="v small" style="color:#8a7a60">${s.d}${s.mp?'（'+s.mp+'）':''}</span></div>`).join('')}
+  ${canAdv?`<hr style="border:none;border-top:1px solid var(--gold);margin:14px 0">
+  <h3 style="margin-bottom:8px;color:#f0d79a">✦ 职业进阶（30级）</h3>
+  <div class="grid" style="grid-template-columns:1fr 1fr">
+    ${c.adv.map(a=>`<div class="cls-card" data-act="adv" data-arg="${a.n}"><div class="nm">${a.n}</div><div class="ds">${a.skill.n}</div></div>`).join('')}
+  </div>`:''}
+  ${canSub?`<hr style="border:none;border-top:1px solid var(--gold);margin:14px 0">
+  <h3 style="margin-bottom:8px;color:#f0d79a">✦ 副职业（60级）</h3>
+  <div class="grid">
+    ${Object.values(CLASSES).filter(x=>x.key!==S.cls).map(x=>`<div class="cls-card" data-act="sub" data-arg="${x.key}"><span class="ic">${x.icon}</span><div class="nm">${x.name}</div><div class="ds">${x.skills[0].n}</div></div>`).join('')}
+  </div>`:''}
+  <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
+  <h3 style="margin-bottom:8px;font-size:14px">称号（${S.titles.length}/${TITLES.length}）</h3>
+  ${S.titles.length?S.titles.map(t=>{const td=TITLES.find(x=>x.name===t);return `<div class="row"><span class="k">🏆 ${t}</span><span class="v small">${td?Object.entries(td.b).map(([k,v])=>k+' +'+v).join(' '):''}</span></div>`;}).join(''):'<div class="small">尚无称号</div>'}`;
+}
+
+function renderInv(p){
+  return `<h3 style="margin-bottom:10px">🎒 背包（${S.inv.length}/40）</h3>
+  <h4 style="font-size:13px;color:#8a7a60;margin:8px 0">已装备</h4>
+  ${SLOTS.map(s=>{const it=S.equip[s.id];return `<div class="item"><span style="width:26px">${s.icon}</span><span class="iname">${it?`<span class="rar${it.rar}">${it.name}</span> <span class="small">Lv.${it.lvl}</span>${it.slot==='weapon'?' <span class="small">（'+reqLabel(it)+'）</span>':''}<br><span class="small">${statLine(it)}</span>`:'<span class="small">— 空 —</span>'}</span>${it?`<button data-act="unequip" data-arg="${s.id}" style="padding:3px 8px;font-size:11px">卸下</button>`:''}</div>`;}).join('')}
+  <h4 style="font-size:13px;color:#8a7a60;margin:14px 0 8px">物品 <span class="small">▲提升 ▼下降</span></h4>
+  ${S.inv.length?S.inv.map((it,i)=>{
+    const cur=S.equip[it.slot];
+    const better=!cur||equipScore(it)>equipScore(cur);
+    const ok=it.slot==='weapon'?canEquip(it):true;
+    return `<div class="item" style="flex-wrap:wrap">
+      <span style="width:26px">${SLOTS.find(s=>s.id===it.slot).icon}</span>
+      <span class="iname" style="flex:1 1 200px">
+        <span class="rar${it.rar}">${it.name}</span>
+        <span class="small"> Lv.${it.lvl} · ${RAR[it.rar].n}</span>
+        ${better?'<span style="color:#7fd4a0;font-weight:bold"> ↑推荐</span>':''}
+        ${it.slot==='weapon'?`<span class="small ${ok?'ok':'danger'}">（${reqLabel(it)}${ok?'':'·职业不符'}）</span>`:''}
+        <br><span class="small">${statCompare(it)}</span>
+      </span>
+      <span style="display:flex;gap:4px">
+        <button data-act="equip" data-arg="${i}" ${ok?'':'disabled'} style="padding:3px 8px;font-size:11px">装备</button>
+        <button data-act="sell" data-arg="${i}" style="padding:3px 8px;font-size:11px">出售</button>
+      </span>
+    </div>`;
+  }).join(''):'<div class="small">空空如也</div>'}`;
+}
+
+function renderDungeon(){
+  return `<h3 style="margin-bottom:10px">🏛 副本</h3>
+  <p class="small" style="margin-bottom:12px"><span class="danger">⚠ Boss每3回合释放技能，会施加流血/灼烧/冰冻/眩晕等状态，请备好药水。</span></p>
+  ${DUNGEONS.map((d,i)=>{const locked=S.level<Math.max(1,d.lv-5);return `<div class="item" style="padding:10px"><span style="font-size:20px">${d.icon}</span><span class="iname"><span style="color:var(--gold2)">${d.name}</span> <span class="small">（Lv.${d.lv}）</span><br><span class="small">${d.desc}</span></span><button data-act="dungeon" data-arg="${i}" ${locked?'disabled':''} style="padding:6px 12px">${locked?'等级不足':'进入'}</button></div>`;}).join('')}`;
+}
+
+function renderCrown(){
+  const shards=S.shards||0;
+  return `<h3 style="margin-bottom:10px">👑 十二圣冠</h3>
+  <p class="small" style="margin-bottom:10px">碎片：<span class="hl">${shards}</span>。集满5个可觉醒。圣冠维持30天。</p>
+  ${S.crown?`<div class="card" style="border-color:#fde047;background:linear-gradient(180deg,#2a2410,#0f0d06)"><div style="font-size:24px">${CROWNS.find(c=>c.name===S.crown.name).icon}</div><div style="color:#fde047;font-size:16px;margin:4px 0">${S.crown.name}</div><div class="small">剩余 ${S.crown.days} 天</div></div>`:''}
+  <div class="flex" style="margin-bottom:12px"><button data-act="crownAwaken" ${shards<5||S.crown?'disabled':''} style="padding:12px">${S.crown?'已持有':'觉醒圣冠（5碎片）'}</button></div>
+  <h4 style="font-size:13px;color:#8a7a60;margin:12px 0 8px">圣冠图鉴</h4>
+  ${CROWNS.map(c=>`<div class="row"><span class="k">${c.icon} ${c.name}</span><span class="v small">${Object.entries(c.b).map(([k,v])=>k+' +'+v+'%').join(' ')}</span></div>`).join('')}`;
+}
+
+function renderGuild(){
+  if(S.mode==='single')return `<h3 style="margin-bottom:10px">🏰 公会</h3><p class="small" style="color:#c98080">单机模式下不可用</p><button data-act="mode" style="margin-top:12px">切换联网</button>`;
+  if(!S.guild){
+    return `<h3 style="margin-bottom:10px">🏰 选择公会</h3>
+    ${GUILDS.map(g=>`<div class="item" style="padding:10px"><span style="font-size:20px">${g.icon}</span><span class="iname"><span style="color:var(--gold2)">${g.name}</span><br><span class="small">${g.desc} ${Object.entries(g.b).map(([k,v])=>k+' +'+v).join(' ')}</span></span><button data-act="joinGuild" data-arg="${g.name}" style="padding:6px 12px">加入</button></div>`).join('')}`;
+  }
+  const g=GUILDS.find(x=>x.name===S.guild);
+  return `<h3 style="margin-bottom:10px">${g.icon} ${g.name}</h3>
+  <div class="row"><span class="k">等级</span><span class="v">Lv.${S.guildLv}/10</span></div>
+  <div class="row"><span class="k">贡献</span><span class="v">${fmt(S.contrib)}</span></div>
+  <div class="row"><span class="k">下一级</span><span class="v">${fmt(S.guildLv*200)}</span></div>
+  <div class="flex" style="margin-top:12px">
+    <button data-act="donate" data-arg="500">捐 500（+50）</button>
+    <button data-act="donate" data-arg="2000">捐 2000（+220）</button>
+  </div>
+  <div style="margin-top:12px"><button data-act="leaveGuild" style="font-size:11px;opacity:.6">退出</button></div>`;
+}
+
+function renderShop(p){
+  if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0};
+  if(!S.skillbooks)S.skillbooks=[];
+  if(!S.weaponStock)S.weaponStock=[];
+  const shopTab=UI.shopTab||'potion';
+
+  let body='';
+  if(shopTab==='potion'){
+    body=`<div class="small" style="margin-bottom:8px">战斗中可使用的消耗品（当前持有数量）</div>
+    ${Object.entries(POTIONS).map(([k,po])=>`<div class="item" style="padding:10px">
+      <span style="font-size:20px">${po.icon}</span>
+      <span class="iname"><span style="color:var(--gold2)">${po.n}</span> <span class="small">持有 ×${S.potions[k]||0}</span><br><span class="small">${po.d}</span></span>
+      <span class="hl" style="margin-right:8px">${fmt(po.price)}</span>
+      <button data-act="buyPotion" data-arg="${k}" ${S.gold<po.price?'disabled':''} style="padding:6px 12px">购买</button>
+    </div>`).join('')}`;
+  } else if(shopTab==='book'){
+    body=`<div class="small" style="margin-bottom:8px">当前职业「${CLASSES[S.cls].name}」的专属技能书。每本只能买一次。</div>
+    ${(SKILLBOOKS[S.cls]||[]).map(b=>{
+      const owned=S.skillbooks.includes(b.id);
+      return `<div class="item" style="padding:10px">
+        <span style="font-size:20px">📕</span>
+        <span class="iname">
+          <span style="color:var(--gold2)">${b.n}</span>${owned?' <span style="color:#7fd4a0">✓ 已学</span>':''}
+          <br><span class="small">${b.d}${b.mp?'（'+b.mp+'斗气）':''}</span>
+        </span>
+        <span class="hl" style="margin-right:8px">${fmt(b.price)}</span>
+        <button data-act="buyBook" data-arg="${b.id}" ${owned||S.gold<b.price?'disabled':''} style="padding:6px 12px">${owned?'已拥有':'购买'}</button>
+      </div>`;
+    }).join('')}`;
+  } else if(shopTab==='gacha'){
+    body=`<div class="card" style="background:#0f0c09;border-color:#a855f7">
+      <div style="font-size:22px;text-align:center">🎁</div>
+      <div class="center" style="color:#a855f7;font-weight:bold;margin:6px 0">精炼石 · 装备盲盒</div>
+      <p class="small center">随机开出一件<b>史诗 ~ 神话</b>品质的装备（不分部位，无职业限制）。<br>价格：<span class="hl">${fmt(GACHA_PRICE)} CC</span></p>
+      <div class="center" style="margin-top:10px">
+        <button data-act="buyGacha" ${S.gold<GACHA_PRICE?'disabled':''} style="padding:12px 30px">开启盲盒</button>
+      </div>
+    </div>
+    <div class="small" style="margin-top:8px">提示：装备等级与你当前等级相近，适合快速补强一个部位。</div>`;
+  } else {
+    ensureWeaponStock();
+    body=`<div class="item" style="padding:10px;background:#0f0c09;border-color:#c8a050">
+      <span style="font-size:20px">🏪</span>
+      <span class="iname"><span style="color:var(--gold2)">流浪武器商</span><br>
+        <span class="small">每次刷新随机出现 4~5 件武器，品质与职业限制随机。刷新费用 <span class="hl">${fmt(WEAPON_REFRESH_COST)} CC</span>。</span>
+      </span>
+      <button data-act="refreshWeaponShop" ${S.gold<WEAPON_REFRESH_COST?'disabled':''} style="padding:8px 12px">🔄 刷新</button>
+    </div>
+    ${S.weaponStock.length?S.weaponStock.map((it,i)=>{
+      const ok=canEquip(it);
+      return `<div class="item" style="padding:10px;flex-wrap:wrap">
+        <span style="font-size:20px">⚔️</span>
+        <span class="iname" style="flex:1 1 200px">
+          <span class="rar${it.rar}">${it.name}</span>
+          <span class="small"> Lv.${it.lvl} · ${RAR[it.rar].n}</span>
+          <span class="small ${ok?'ok':'danger'}">（${reqLabel(it)}${ok?'':' · 你无法装备'}）</span>
+          <br><span class="small">${STAT_KEYS.filter(k=>it[k]).map(k=>STAT_LABELS[k]+'+'+it[k]).join('　')}</span>
+        </span>
+        <span class="hl" style="margin-right:8px">${fmt(it.shopPrice)}</span>
+        <button data-act="buyWeapon" data-arg="${i}" ${S.gold<it.shopPrice?'disabled':''} style="padding:6px 12px">购买</button>
+      </div>`;
+    }).join(''):'<div class="small">商人的货架空了，刷新一下吧。</div>'}`;
+  }
+
+  return `<h3 style="margin-bottom:10px">🏪 商店</h3>
+  <p class="small" style="margin-bottom:10px">持有：<span class="hl">${fmt(S.gold)} CC</span></p>
+  <div class="tabs" style="margin-bottom:12px">
+    <button class="${shopTab==='potion'?'active':''}" data-act="shopTab" data-arg="potion">药水</button>
+    <button class="${shopTab==='book'?'active':''}" data-act="shopTab" data-arg="book">技能书</button>
+    <button class="${shopTab==='gacha'?'active':''}" data-act="shopTab" data-arg="gacha">盲盒</button>
+    <button class="${shopTab==='weapon'?'active':''}" data-act="shopTab" data-arg="weapon">武器店</button>
+  </div>
+  ${body}`;
+}
+
+function statusBar(){
+  if(!B||!B.status)return '';
+  const s=B.status;
+  let html='';
+  if(s.bleed>0)html+='<span class="status-tag status-bleed">🩸 流血 '+s.bleed+'</span>';
+  if(s.burn>0)html+='<span class="status-tag status-burn">🔥 灼烧 '+s.burn+'</span>';
+  if(s.freeze>0)html+='<span class="status-tag status-freeze">❄️ 冰冻 '+s.freeze+'</span>';
+  if(s.stun>0)html+='<span class="status-tag status-stun">💫 眩晕 '+s.stun+'</span>';
+  return html?'<div class="status-bar">'+html+'</div>':'';
+}
+
+function renderBattle(){
+  const p=playerStats();const e=B.enemy;const skills=getSkills();
+  const canAct=!(B.status.freeze>0||B.status.stun>0)&&!B.busy&&!B.over;
+  return `
+  <div class="topbar">
+    <span class="pname">${S.name}</span>
+    <span class="tag">Lv.${S.level}</span>
+    <span class="tag">${CLASSES[S.cls].icon} ${S.adv||CLASSES[S.cls].name}</span>
+  </div>
+  <div class="card" style="padding:10px 14px;margin-bottom:10px">
+    ${bar(S.hp,p.hp,'hpfill')}
+    ${bar(S.mp,p.mp,'mpfill')}
+    ${statusBar()}
+  </div>
+  <div class="enemy-box">
+    <span class="enemy-ic">${e.isBoss?'🐲':'👹'}</span>
+    <div class="enemy-name">${e.name} ${e.isBoss?'<span class="tag" style="border-color:#c0392b;color:#e88a7a">BOSS</span>':''}</div>
+    <div class="small">Lv.${e.lv}${e.isBoss?'　下一技能：'+[3,6,9,12].find(n=>n>B.bossTurn)+'回合后':''}</div>
+    ${bar(e.hp,e.maxHp,'hpfill')}
+  </div>
+  <div class="card"><div class="log" id="battleLog">${B.log.slice(-40).map(l=>`<div class="${l.t}">${l.m}</div>`).join('')}</div></div>
+  ${B.over?`
+    <div class="card center">
+      ${B.reward.exp?`<div class="hl" style="font-size:15px">战斗胜利</div><div class="small">经验 +${fmt(B.reward.exp)}　金币 +${fmt(B.reward.gold)}</div>${B.reward.items.length?`<div class="small">战利品：${B.reward.items.map(i=>`<span class="rar${i.rar}">${i.name}</span>`).join('、')}</div>`:''}${B.reward.shards?`<div class="small hl">圣冠碎片 +1</div>`:''}`:`<div class="danger" style="font-size:15px">战斗结束</div>`}
+      <div class="flex" style="margin-top:12px"><button data-act="endBattle" style="padding:12px">返 回</button></div>
+    </div>
+  `:`
+    <div style="margin-bottom:8px">
+      ${skills.map((s,i)=>`<button class="skill-btn" data-act="skill" data-arg="${i}" ${!canAct||s.mp>S.mp?'disabled':''}><span>${s.n}</span><small>${s.mp?s.mp+' 斗气':'无消耗'}　${s.d}</small></button>`).join('')}
+      <div style="border-top:1px dashed var(--line);padding-top:8px;margin-top:4px">
+        <div class="small" style="margin-bottom:4px">药水</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          ${Object.entries(POTIONS).map(([k,po])=>{
+            const qty=(S.potions&&S.potions[k])||0;
+            return `<button class="potion-btn" data-act="potion" data-arg="${k}" ${!canAct||qty<=0?'disabled':''}>${po.icon} ${po.n}×${qty}</button>`;
+          }).join('')}
+        </div>
+      </div>
+      <button class="skill-btn" data-act="flee" ${!canAct?'disabled':''} style="margin-top:8px"><span>🏃 逃跑</span><small>速度越高成功率越高</small></button>
+    </div>
+  `}`;
+}
+
+function render(){
+  const root=document.getElementById('root');let html='';
+  if(!S)html=renderTitle();
+  else if(B)html=renderBattle();
+  else html=renderMain();
+  html+=`<div id="notif" class="notif" style="display:${UI.notif?'block':'none'}">${UI.notif||''}</div>`;
+  root.innerHTML=html;
+  const log=document.getElementById('battleLog');if(log)log.scrollTop=log.scrollHeight;
+  const chatBox=document.getElementById('chatBox');if(chatBox)chatBox.scrollTop=chatBox.scrollHeight;
+}
+
+document.getElementById('root').addEventListener('click',async ev=>{
+  const btn=ev.target.closest('[data-act]');if(!btn)return;
+  const act=btn.dataset.act;const arg=btn.dataset.arg;
+  switch(act){
+    case 'newgame':UI.creating=true;S=null;renderCreateScreen();break;
+    case 'loadgame':if(load()){syncVitals();render();notify('存档已读取');if(socialReady())syncMyProfile();}else notify('无存档');break;
+    case 'origin':UI.originSel=arg;renderCreateScreen();break;
+    case 'class':UI.classSel=arg;renderCreateScreen();break;
+    case 'back':S=null;render();break;
+    case 'begin':beginGame();break;
+    case 'tab':UI.tab=arg;if(arg==='social'&&socialReady())syncMyProfile();render();break;
+    case 'region':UI.region=parseInt(arg);render();break;
+    case 'explore':explore();break;
+    case 'mode':S.mode=S.mode==='online'?'single':'online';if(S.mode==='single'&&UI.tab==='guild')UI.tab='explore';save();render();notify(S.mode==='online'?'联网模式':'单机模式（经验+20%）');break;
+    case 'equip':equipItem(parseInt(arg));break;
+    case 'sell':sellItem(parseInt(arg));break;
+    case 'unequip':if(S.equip[arg]){S.inv.push(S.equip[arg]);S.equip[arg]=null;syncVitals();save();render();if(socialReady())syncMyProfile();}break;
+    case 'adv':S.adv=arg;S.hp=playerStats().hp;S.mp=playerStats().mp;save();render();if(socialReady())syncMyProfile();notify('进阶：'+arg);break;
+    case 'sub':S.sub=arg;save();render();if(socialReady())syncMyProfile();notify('副职业：'+CLASSES[arg].name);break;
+    case 'dungeon':enterDungeon(parseInt(arg));break;
+    case 'skill':await useSkill(parseInt(arg));break;
+    case 'potion':usePotion(arg);break;
+    case 'flee':flee();break;
+    case 'endBattle':B=null;render();break;
+    case 'crownAwaken':{if((S.shards||0)<5||S.crown)return;S.shards-=5;const c=pick(CROWNS);S.crown={name:c.name,days:30};S.hp=playerStats().hp;S.mp=playerStats().mp;save();render();if(socialReady())syncMyProfile();notify('👑 觉醒：'+c.name);break;}
+    case 'joinGuild':S.guild=arg;S.guildLv=1;S.contrib=0;save();render();notify('已加入 '+arg);break;
+    case 'donate':{const amt=parseInt(arg);if(S.gold<amt)return;S.gold-=amt;S.contrib+=Math.floor(amt/10);while(S.guildLv<10&&S.contrib>=S.guildLv*200){S.contrib-=S.guildLv*200;S.guildLv++;notify('公会升级至 Lv.'+S.guildLv);}save();render();break;}
+    case 'leaveGuild':S.guild=null;S.guildLv=1;S.contrib=0;save();render();break;
+    case 'shopTab':UI.shopTab=arg;if(arg==='weapon')ensureWeaponStock();render();break;
+    case 'buyPotion':{const po=POTIONS[arg];if(!po||S.gold<po.price)return;S.gold-=po.price;if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0};S.potions[arg]=(S.potions[arg]||0)+1;save();render();notify('购买 '+po.n);break;}
+    case 'buyBook':{const bk=(SKILLBOOKS[S.cls]||[]).find(b=>b.id===arg);if(!bk||S.skillbooks.includes(arg)||S.gold<bk.price)return;S.gold-=bk.price;S.skillbooks.push(arg);save();render();notify('学会技能书：'+bk.n);break;}
+    case 'buyGacha':{
+      if(S.gold<GACHA_PRICE){notify('金币不足');return;}
+      if(S.inv.length>=40){notify('背包已满');return;}
+      S.gold-=GACHA_PRICE;
+      const rar=rnd(4,7);
+      const lv=Math.max(S.level,10);
+      const it=genEquip(pick(SLOTS).id,lv,rar);
+      S.inv.push(it);save();render();
+      notify('🎁 开出：'+it.name);
+      break;
+    }
+    case 'refreshWeaponShop':{
+      if(S.gold<WEAPON_REFRESH_COST){notify('金币不足');return;}
+      S.gold-=WEAPON_REFRESH_COST;
+      refreshWeaponStock();save();render();notify('武器已刷新');
+      break;
+    }
+    case 'buyWeapon':{
+      const idx=parseInt(arg);
+      if(!S.weaponStock)return;
+      const it=S.weaponStock[idx];if(!it)return;
+      if(S.gold<it.shopPrice){notify('金币不足');return;}
+      if(S.inv.length>=40){notify('背包已满');return;}
+      S.gold-=it.shopPrice;
+      const copy=JSON.parse(JSON.stringify(it));
+      delete copy.shopPrice;
+      S.inv.push(copy);
+      S.weaponStock.splice(idx,1);
+      save();render();
+      notify('购买 '+copy.name);
+      break;
+    }
+    case 'reset':if(confirm('删除存档重新开始？（会清空本地存档，云端资料仍保留）')){try{localStorage.removeItem('holycrown_save');}catch(e){}S=null;B=null;UI.creating=true;UI.classSel=null;render();}break;
+  }
+});
+
+function renderCreateScreen(){
+  const root=document.getElementById('root');root.innerHTML=renderCreate();
+  const inp=document.getElementById('nameInput');if(inp){inp.addEventListener('input',e=>{UI.name=e.target.value;});inp.focus();}
+}
+
+function beginGame(){
+  const inp=document.getElementById('nameInput');if(inp)UI.name=inp.value.trim();
+  if(!UI.classSel){notify('请选择职业');return;}
+  if(!UI.name){notify('请输入角色名');return;}
+  S={name:UI.name,origin:UI.originSel,cls:UI.classSel,level:1,exp:0,hp:0,mp:0,gold:500,shards:0,inv:[],equip:{weapon:null,helmet:null,armor:null,boots:null,bracer:null,bracelet:null,ring:null,necklace:null},adv:null,sub:null,crown:null,titles:[],guild:null,guildLv:1,contrib:0,mode:'online',day:1,kills:0,deaths:0,skillbooks:[],potions:{hp:2,hpBig:0,mp:1,ultimate:0},weaponStock:[]};
+  const p=playerStats();S.hp=p.hp;S.mp=p.mp;
+  const starter=genEquip('weapon',1,1);starter.name='新手·'+starter.name;S.equip.weapon=starter;
+  B=null;UI.tab='explore';save();render();notify('欢迎来到阿斯米德约顿');
+  if(socialReady())syncMyProfile();
+}
+
+(function init(){
+  if(load()){syncVitals();render();}
+  else{render();}
+  // 开始等待 Firebase 连接
+  setTimeout(()=>waitForFirebase(0),800);
+})();
+</script>
+</body>
+</html>
