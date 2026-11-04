@@ -234,6 +234,13 @@ const BOSS_SKILLS=[
   {n:'嗜血撕咬',effect:'drain',turns:0,mul:1.5,d:'吸血'},
   {n:'眩晕冲击',effect:'stun',turns:1,mul:1.1,d:'眩晕1回合'}
 ];
+const ENEMY_SKILLS=[
+  {n:'致命一击',effect:'bleed',turns:2,mul:1.5,d:'流血2回合'},
+  {n:'凶猛冲撞',effect:'stun',turns:1,mul:1.4,d:'眩晕1回合'},
+  {n:'毒液喷射',effect:'burn',turns:3,mul:1.3,d:'灼烧3回合'},
+  {n:'狂暴撕咬',effect:'drain',turns:0,mul:1.8,d:'吸血'},
+  {n:'冻结之爪',effect:'freeze',turns:1,mul:1.4,d:'冰冻1回合'}
+];
 
 const BOSS_RULES = {
   '矿坑巨蛛': { type: 'turns', turns: [1, 4, 7] }, 
@@ -261,6 +268,7 @@ const WORLD_MAP = [
           { id: 'tavern', name: '酒馆·醉汉之角', icon: '🍻' },
           { id: 'guild', name: '公会大厅', icon: '🏛️' },
           { id: 'smith', name: '铁匠铺', icon: '⚒️' },
+          { id: 'library', name: '废弃图书馆', icon: '📚' },
           { id: 'gate', name: '城门 / 野外', icon: '🚪' }
         ]
       },
@@ -300,6 +308,7 @@ const WORLD_MAP = [
           { id: 'tavern', name: '根脉酒馆', icon: '🍻' },
           { id: 'beast', name: '驯兽场', icon: '🐾' },
           { id: 'smith', name: '翠绿铁匠铺', icon: '⚒️' },
+          { id: 'treasure', name: '古老宝库', icon: '🗝️' },
           { id: 'gate', name: '七叶森林', icon: '🌲' }
         ]
       }
@@ -314,6 +323,7 @@ const WORLD_MAP = [
           { id: 'tavern', name: '叹息酒馆', icon: '🍻' },
           { id: 'church', name: '负罪者祭坛', icon: '⛪' },
           { id: 'smith', name: '极寒铁匠铺', icon: '⚒️' },
+          { id: 'library', name: '冰封藏经阁', icon: '📚' },
           { id: 'gate', name: '血泪荒原', icon: '🩸' }
         ]
       }
@@ -425,7 +435,8 @@ let S=null,B=null;
 let UI={tab:'explore',classSel:null,originSel:'julius',notif:'',creating:true,inCreate:false,shopTab:'potion',guildTab:'list',showAuthModal:false,authMode:'login',wildActive:false,wildLog:[],wildPos:{x:0,y:0},wildStep:0,inviteBoss:null,
   mapLevel:'world', curRegion:0, curCity:0, curBuilding:null, activeNpc:null,
   mix:[],bld:null,wander:null,
-  showMailModal:false, showGiftModal:null
+  showMailModal:false, showGiftModal:null,
+  npcDialog: [], npcInputText: ''
 };
 let notifTimer=null;
 
@@ -496,6 +507,7 @@ function fixSaveData(){
   if(!S.learned)S.learned=[];
   if(!S.recipes)S.recipes={};
   if(!S.mats)S.mats={};
+  if(!S.npcFavor)S.npcFavor={};
   Object.keys(MATS).forEach(k=>{S.mats[k]=S.mats[k]||0;});
   if(S.training===undefined)S.training=null;
   if(S.beast===undefined)S.beast=null;
@@ -765,7 +777,8 @@ async function enemyTurn(){
   
   B.bossTurn++;
   let useBossSkill = false;
-  
+  let useEnemySkill = false;
+
   if (e.isBoss) {
     const rule = BOSS_RULES[e.name] || { type: 'turns', turns: [3, 6, 9] };
     if (rule.type === 'turns') {
@@ -775,11 +788,15 @@ async function enemyTurn(){
     } else if (rule.type === 'hp') {
       if ((e.hp / e.maxHp) <= rule.hpPct && Math.random() < rule.chance) useBossSkill = true;
     }
+  } else {
+    if (B.turn > 0 && B.turn % 4 === 0) useEnemySkill = true;
   }
 
-  if(useBossSkill){
-    const sk=pick(BOSS_SKILLS);const eOpts={defFactor:0.05,spread:0.20,minMul:0.35};const er=calcDmg(e.atk,0,sk.mul,10,eOpts);S.hp-=er.dmg;
-    B.log.push({t:'skill',m:'👑 '+e.name+' 释放「'+sk.n+'」！造成 '+fmt(er.dmg)+' 点伤害'});
+  if(useBossSkill || useEnemySkill){
+    const sk = e.isBoss ? pick(BOSS_SKILLS) : pick(ENEMY_SKILLS);
+    const eOpts= e.isBoss?{defFactor:0.05,spread:0.20,minMul:0.35}:{defFactor:0.1,spread:0.15,minMul:0.25};
+    const er=calcDmg(e.atk,0,sk.mul,10,eOpts);S.hp-=er.dmg;
+    B.log.push({t:'skill',m:(e.isBoss?'👑 ':'💢 ')+e.name+' 释放「'+sk.n+'」！造成 '+fmt(er.dmg)+' 点伤害'});
     if(sk.effect==='bleed'){B.status.bleed=sk.turns;B.log.push({t:'sys',m:'🩸 你陷入了流血状态（'+sk.turns+'回合）'});}
     if(sk.effect==='burn'){B.status.burn=sk.turns;B.log.push({t:'sys',m:'🔥 你陷入了灼烧状态（'+sk.turns+'回合）'});}
     if(sk.effect==='freeze'){B.status.freeze=sk.turns;B.log.push({t:'sys',m:'❄️ 你被冰冻了（'+sk.turns+'回合）'});}
@@ -1009,7 +1026,12 @@ function openNpc(npcId) {
   const bId = UI.curBuilding;
   const npcs = NPC_DATA[UI.curRegion]?.[bId] || [];
   const npc = npcs.find(n => n.id === npcId);
-  if(npc) { UI.activeNpc = npc; render(); }
+  if(npc) { 
+    UI.activeNpc = npc; 
+    UI.npcDialog = [{ from: 'npc', text: npc.line || '“你好，旅行者。”' }];
+    UI.npcInputText = '';
+    render(); 
+  }
 }
 function closeNpc() { UI.activeNpc = null; render(); }
 
@@ -1140,6 +1162,56 @@ function enhanceItem(slotId) {
   if(window.syncMyProfile) syncMyProfile();
 }
 
+// ================= 好感度与NPC对话系统 =================
+function changeFavor(npcName, amount) {
+  if(!S.npcFavor) S.npcFavor = {};
+  S.npcFavor[npcName] = clamp((S.npcFavor[npcName] || 0) + amount, 0, 100);
+  save();
+}
+
+function sendNpcMessage(text) {
+  if(!UI.activeNpc || !text.trim()) return;
+  const npc = UI.activeNpc;
+  const msg = text.trim();
+  UI.npcDialog.push({ from: 'me', text: msg });
+  
+  let reply = '';
+  const lowerMsg = msg.toLowerCase();
+  
+  if(lowerMsg.includes('任务') || lowerMsg.includes('帮忙')) {
+    if(npc.quest) reply = '我确实需要你的帮助，你看看任务栏吧。';
+    else reply = '我现在没有什么需要帮忙的。';
+  } else if(lowerMsg.includes('圣冠') || lowerMsg.includes('历史')) {
+    reply = '圣冠是那个时代的罪孽与荣耀的结晶……你想知道更多，得先和我混熟。';
+  } else if(lowerMsg.includes('再见') || lowerMsg.includes('拜拜')) {
+    reply = '路上小心。';
+  } else {
+    reply = pick(['嗯？', '这世界很大，到处去看看吧。', '你说的这些，我年轻时也想过。', '如果你能带点礼物来，我会更高兴。']);
+  }
+  
+  setTimeout(() => {
+    UI.npcDialog.push({ from: 'npc', text: reply });
+    render();
+  }, 600);
+  
+  render();
+}
+
+function giftNpc(itemKey, npcName) {
+  if(!S.inv[itemKey]) return;
+  const it = S.inv[itemKey];
+  S.inv.splice(itemKey, 1);
+  let favor = 0;
+  if(it.slot) favor = rnd(5, 15); // 装备
+  else if(POTIONS[itemKey]) favor = 20; // 药水
+  else if(MATS[itemKey]) favor = 10; // 材料
+  
+  changeFavor(npcName, favor);
+  save(); render();
+  notify(`赠送成功，好感度 +${favor}`);
+  UI.npcDialog.push({ from: 'npc', text: '这真是件好东西，谢谢你，我的朋友。' });
+}
+
 // ================= 邮件与好友赠送 =================
 function sendGift(friendUid, invIdx) {
   if(!socialReady()) return;
@@ -1231,7 +1303,7 @@ function renderGiftModal() {
 async function syncMyProfile(){
   if(!socialReady()||!S)return;
   try{
-    const power = Number(calcPower()); // 强制数字
+    const power = Number(calcPower()); 
     const profile={ name: S.name, level:S.level, power: power, cls:S.cls, adv:S.adv||CLASSES[S.cls].name, online:true, updatedAt:FB.serverTimestamp() };
     await FB.set(FB.ref(FB.db,'users/'+MY_UID),profile);
     await FB.set(FB.ref(FB.db,'leaderboard/'+MY_UID),profile);
@@ -1268,7 +1340,6 @@ function startSocialListeners(){
     if(UI.showMailModal && !B) render();
   });
 
-  // 修复：直接拉取全量，本地强制按数字降序排序，解决Firebase字符串排序错乱
   L2(FB.ref(FB.db,'leaderboard'), snap => {
     social.leaderboard = [];
     snap.forEach(c => {
@@ -1276,7 +1347,7 @@ function startSocialListeners(){
         social.leaderboard.push({uid: c.key, ...val, power: Number(val.power) || 0});
     });
     social.leaderboard.sort((a, b) => b.power - a.power);
-    social.leaderboard = social.leaderboard.slice(0, 50); // 只显示前50
+    social.leaderboard = social.leaderboard.slice(0, 50);
     if(UI.tab==='social'&&!B)render();
   });
 
@@ -1657,6 +1728,12 @@ function renderExplore(){
         </div>`;
       }).join('');
     }
+  } else if(UI.curBuilding === 'library' || UI.curBuilding === 'treasure') {
+    // 新增：探索宝箱
+    interiorHtml += `<div class="card" style="background:#0f0c09">
+      <p class="small" style="margin-bottom:8px">${UI.curBuilding==='library'?'书架上落满了灰尘，角落里似乎藏着什么。':'宝库深处幽暗无光，也许还能找到些遗落的财宝。'}</p>
+      <button data-hc="searchRoom" style="width:100%;padding:10px;background:#1d301d;color:#7fd4a0">🔍 搜寻宝物</button>
+    </div>`;
   } else if(UI.curBuilding === 'tavern' || UI.curBuilding === 'guild') {
     let qHtml = '';
     if(S.dailyQuests.length > 0) {
@@ -1738,51 +1815,66 @@ function renderExplore(){
 function renderNpcModal(){
   if(!UI.activeNpc) return '';
   const n = UI.activeNpc;
+  const favor = S.npcFavor[n.name] || 0;
   const q = n.quest;
-  let h = '';
-  if(n.line) h += `<div class="small" style="margin-bottom:10px">“${n.line}”</div>`;
   
-  const ts = LEARN.filter(x=>x.by===n.id&&hasCls(x.cls));
-  if(ts.length) {
-    h += '<div class="small" style="color:#a855f7;margin-bottom:6px">📖 传授技艺（修习期间可继续冒险）</div>';
-    h += ts.map(s=>{
-      const own=S.learned.includes(s.id);
-      return `<div class="item"><span class="iname"><span class="hl">${s.n}</span> <span class="small">Lv.${s.need}｜${fmt(s.price)} CC｜${Math.round(s.sec/60)}分钟</span><br><span class="small">${s.d}${s.mp?'（'+s.mp+'斗气）':''}</span></span><button data-hc="train" data-arg="${s.id}" ${own||S.training||S.level<s.need||S.gold<s.price?'disabled':''} style="padding:5px 10px;font-size:12px">${own?'已学':'修习'}</button></div>`;
-    }).join('');
-  }
-
+  let questState = '';
   if(q) {
     const state = S.quests && S.quests[q.id];
     if(!state || state.status === 'none') {
-      h += `
-        <div class="small" style="color:#a855f7;margin:8px 0">📜 可接取任务</div>
-        <div class="hl" style="margin-bottom:4px">${q.title}</div>
-        <div class="small" style="margin-bottom:8px">${q.desc}</div>
-        <div class="small" style="margin-bottom:12px">奖励：经验 +${q.rewardExp}，金币 +${q.rewardGold}${q.title?'，称号【'+q.title+'】':''}</div>
-        <button data-hc="acceptQuest" style="width:100%;background:#3d2e19;border-color:var(--gold)">接取任务</button>
-      `;
+      questState = `<button data-hc="acceptQuest" style="width:100%;padding:10px;margin-top:8px;background:#3d2e19;border-color:var(--gold)">接取任务：${q.title}</button>`;
     } else if(state.status === 'doing') {
       let canSubmit = false;
       if(q.type === 'kill' && state.progress >= q.req) canSubmit = true;
       if(q.type === 'collect' && S.gold >= q.req) canSubmit = true;
-      h += `
-        <div class="small" style="color:#f0b060;margin:8px 0">⏳ 任务进行中：${q.title}（${q.type==='kill'?state.progress+' / '+q.req:q.req+' CC'}）</div>
-        <button data-hc="submitQuest" ${canSubmit?'':'disabled'} style="width:100%;background:#1d301d;border-color:#2a4a2a;color:#7fd4a0">${canSubmit?'提交任务':'尚未完成'}</button>
+      questState = `
+        <div class="small" style="margin-top:8px;color:#f0b060">任务进度：${q.type==='kill'?state.progress+' / '+q.req:q.req+' CC'}</div>
+        <button data-hc="submitQuest" ${canSubmit?'':'disabled'} style="width:100%;padding:10px;margin-top:8px;background:#1d301d;border-color:#2a4a2a;color:#7fd4a0">${canSubmit?'提交任务':'尚未完成'}</button>
       `;
     } else {
-      h += `<div class="small" style="color:#7fd4a0;margin-top:8px">✓ 任务已完成</div>`;
+      questState = `<div class="small ok" style="margin-top:8px">✓ 任务已完成</div>`;
     }
-  } else if(!n.line) {
-    h += `<div class="small">“愿圣光护佑你。”</div>`;
   }
+
+  const dialogHtml = UI.npcDialog.map(d => `
+    <div class="chat-msg ${d.from==='me'?'me':'other'}">
+      <span class="chat-bubble">${escapeHtml(d.text)}</span>
+    </div>
+  `).join('');
 
   return `
     <div class="modal-mask">
-      <div class="modal">
-        <div class="center" style="font-size:32px;margin-bottom:8px">${n.icon}</div>
-        <h3 class="center" style="margin-bottom:12px">${n.name}</h3>
-        <div class="card" style="background:#0f0c09">${h}</div>
-        <button data-hc="closeNpc" style="width:100%;margin-top:8px">离开</button>
+      <div class="modal" style="max-width:400px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="font-size:40px">${n.icon}</div>
+          <div>
+            <h3 style="margin:0">${n.name}</h3>
+            <div class="small">好感度：${favor} / 100</div>
+            <div class="bar" style="width:100px;height:6px;margin-top:2px"><div class="expfill" style="width:${favor}%;background:#a855f7"></div></div>
+          </div>
+        </div>
+        
+        <div class="chat-box" style="height:200px;margin-bottom:8px">
+          ${dialogHtml}
+        </div>
+        
+        <div style="margin-bottom:8px">
+          <div class="small" style="margin-bottom:4px">快捷选项</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button data-hc="npcOpt" data-arg="任务" style="font-size:11px;padding:4px 8px">你有什么任务吗？</button>
+            <button data-hc="npcOpt" data-arg="送礼" style="font-size:11px;padding:4px 8px">我想送你点东西</button>
+            <button data-hc="npcOpt" data-arg="圣冠" style="font-size:11px;padding:4px 8px">关于圣冠的传闻</button>
+          </div>
+        </div>
+        
+        ${questState}
+        ${q?`<div class="card" style="background:#0f0c09;margin-top:8px"><div class="small">奖励：经验+${q.rewardExp}，金币+${q.rewardGold}</div></div>`:''}
+
+        <div style="display:flex;gap:6px;margin-top:12px">
+          <input id="npcInput" placeholder="输入对话…" style="flex:1;font-size:12px" onkeydown="if(event.key==='Enter'){sendNpcMessage(this.value);this.value=''}">
+          <button data-hc="npcSend" style="padding:8px 12px">发送</button>
+          <button data-hc="closeNpc" style="padding:8px 12px;background:#3a1a1a">离开</button>
+        </div>
       </div>
     </div>
   `;
@@ -1992,7 +2084,22 @@ root.addEventListener('click', async ev => {
       acceptFriend(uid){ acceptFriend(uid); },
       sendChatMsg(){ const i=document.getElementById('chatInput'); if(i) { sendChatMessage(i.value); i.value=''; } },
       acceptInvite(){ alert('已接受，请前往野外寻找！'); },
-      enhance(slotId){ enhanceItem(slotId); }
+      enhance(slotId){ enhanceItem(slotId); },
+      searchRoom(){
+        if(S.gold < 100) { notify('需要 100 CC 购买火把和工具'); return; }
+        S.gold -= 100;
+        if(Math.random()<0.4){ const gold=rnd(200,800); S.gold+=gold; notify(`搜到了 ${gold} CC！`); }
+        else if(Math.random()<0.7){ const rar=rnd(2,5); const it=genEquip(pick(SLOTS).id, S.level+rnd(-2,5), rar); S.inv.push(it); notify(`找到一件宝物：${it.name}`); }
+        else { notify('只找到一堆没用的废纸...'); }
+        save(); render();
+      },
+      npcSend(){ const i=document.getElementById('npcInput'); if(i) { sendNpcMessage(i.value); i.value=''; } },
+      npcOpt(opt){
+        if(opt==='任务') { if(UI.activeNpc.quest) { UI.npcDialog.push({from:'me',text:'你有什么任务吗？'}); setTimeout(()=>{UI.npcDialog.push({from:'npc',text:'你看看任务栏吧，我确实需要帮助。'});render();},500); } else { UI.npcDialog.push({from:'me',text:'你有什么任务吗？'}); setTimeout(()=>{UI.npcDialog.push({from:'npc',text:'我现在没什么需要帮忙的。'});render();},500); } render(); }
+        else if(opt==='送礼') { openGiftToNpc(); }
+        else if(opt==='圣冠') { UI.npcDialog.push({from:'me',text:'关于圣冠的传闻...'}); setTimeout(()=>{UI.npcDialog.push({from:'npc',text:pick(['那是旧世界的罪孽，别去碰它。','我只知道十二圣冠散落在大陆各处。','如果你能找到圣冠，也许能改写命运。'])});render();},500); render(); }
+      },
+      closeNpc(){ closeNpc(); }
     };
     if(HC[hc]) HC[hc](arg);
     return;
@@ -2095,7 +2202,7 @@ function beginGame(){
   const inp=document.getElementById('nameInput');if(inp)UI.name=inp.value.trim();
   if(!UI.classSel){notify('请选择职业');return;}
   if(!UI.name){notify('请输入角色名');return;}
-  S={name:UI.name.slice(0,12),origin:UI.originSel,cls:UI.classSel,level:1,exp:0,hp:0,mp:0,gold:500,shards:0,inv:[],equip:{weapon:null,helmet:null,armor:null,boots:null,bracer:null,bracelet:null,ring:null,necklace:null},adv:null,sub:null,crown:null,titles:[],guildId:null,mode:'online',day:1,kills:0,deaths:0,skillbooks:[],potions:{hp:2,hpBig:0,mp:1,ultimate:0,fire:0},weaponStock:[],markedBosses:[],quests:{},learned:[],recipes:{},mats:{},training:null,beast:null,lastDailyReset:0,dailyQuests:[]};
+  S={name:UI.name.slice(0,12),origin:UI.originSel,cls:UI.classSel,level:1,exp:0,hp:0,mp:0,gold:500,shards:0,inv:[],equip:{weapon:null,helmet:null,armor:null,boots:null,bracer:null,bracelet:null,ring:null,necklace:null},adv:null,sub:null,crown:null,titles:[],guildId:null,mode:'online',day:1,kills:0,deaths:0,skillbooks:[],potions:{hp:2,hpBig:0,mp:1,ultimate:0,fire:0},weaponStock:[],markedBosses:[],quests:{},learned:[],recipes:{},mats:{},training:null,beast:null,lastDailyReset:0,dailyQuests:[],npcFavor:{}};
   const p=playerStats();S.hp=p.hp;S.mp=p.mp;
   const starter=genEquip('weapon',1,1);starter.name='新手·'+starter.name;S.equip.weapon=starter;
   B=null;UI.tab='explore';UI.mapLevel='world';UI.inCreate=false;save();render();notify('欢迎来到阿斯米德约顿');
