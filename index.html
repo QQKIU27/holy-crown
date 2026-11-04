@@ -882,7 +882,7 @@ function equipScore(it){
 }
 
 function makeEnemy(name,lv,isBoss){
-  const bmHp=(isBoss?1.8:1)*(1+lv/80),bmAtk=(isBoss?2.4:1)*(1.7+lv/90)*(isBoss?0.8:1),bmDef=isBoss?1.15:1;
+  const bmHp=(isBoss?2.0:1)*(1+lv/80),bmAtk=(isBoss?2.95:1.28)*(1.7+lv/90)*(isBoss?0.9:1),bmDef=isBoss?1.22:1;
   const e={name,lv,maxHp:Math.round((40+lv*20+lv*lv*0.55)*bmHp*rf(0.92,1.08)),atk:Math.round((5+lv*2.2)*bmAtk*rf(0.92,1.08)),def:Math.round((3+lv*1.5)*bmDef*rf(0.9,1.1)),spd:Math.round((6+lv*1.2)*rf(0.9,1.1)),isBoss};
   e.hp=e.maxHp;return e;
 }
@@ -1024,6 +1024,7 @@ async function winBattle(){
   let gold=enemyGold(e);const gm=ORIGINS[S.origin].bonus.goldMul||1;gold=Math.round(gold*gm);
   S.exp+=exp;S.gold+=gold;B.reward.exp=exp;B.reward.gold=gold;
   B.log.push({t:'win',m:'✦ 击败 '+e.name+'！获得 '+fmt(exp)+' 经验、'+fmt(gold)+' CC'});
+  if(e.isBoss&&e.worldMarkerId){const mi=(S.markedBosses||[]).findIndex(x=>x.id===e.worldMarkerId);if(mi>=0){S.markedBosses.splice(mi,1);B.log.push({t:'sys',m:'📍 世界BOSS已击败，地图定位已自动清除'});}}
   const dropCount=e.isBoss?rnd(2,3):(Math.random()<0.45?1:0);
   for(let i=0;i<dropCount;i++){if(S.inv.length>=40){B.log.push({t:'sys',m:'背包已满'});break;}const it=genEquip(pick(SLOTS).id,e.lv,Math.min(8,Math.max(0,Math.floor(e.lv/18)+rnd(0,2))));S.inv.push(it);B.reward.items.push(it);B.log.push({t:'win',m:'📦 获得装备：'+it.name});}
   if(e.isBoss&&Math.random()<0.5){S.shards=(S.shards||0)+1;B.reward.shards=1;B.log.push({t:'win',m:'✧ 获得「圣冠碎片」×1'});}
@@ -1131,9 +1132,11 @@ function wildMove(dir){
   if(r < 0.15) {
     const bossName = '深渊吞噬者';
     const boss = makeEnemy(bossName, S.level + 10, true);
+    const markerId='wb_'+Date.now()+'_'+rnd(100,999);
+    boss.worldMarkerId=markerId;
     UI.wildLog.push({t:'win', m:`⚠️ 前方出现了强烈的深渊气息！世界BOSS【${bossName}】在此游荡！`});
-    S.markedBosses.push({ name: bossName, lv: boss.lv, x: UI.wildPos.x, y: UI.wildPos.y, region: WORLD_MAP[UI.curRegion].name });
-    if(S.markedBosses.length>10) S.markedBosses.shift();
+    S.markedBosses.push({ id:markerId, name: bossName, lv: boss.lv, x: UI.wildPos.x, y: UI.wildPos.y, region: WORLD_MAP[UI.curRegion].name });
+    if(S.markedBosses.length>30) S.markedBosses.shift();
     save();
     startBattle(boss);
   } 
@@ -1698,7 +1701,7 @@ function startSocialListeners(){
     if(UI.showMailModal && !B) render();
   });
 
-  L2(FB.ref(FB.db,'arenaInvites/'+MY_UID),snap=>{social.arenaInvites=[];snap.forEach(c=>social.arenaInvites.push({duelId:c.key,...c.val()}));if(UI.tab==='arena'&&!B)render();});
+  L2(FB.ref(FB.db,'arenaInvites/'+MY_UID),snap=>{social.arenaInvites=[];snap.forEach(c=>{const v=c.val()||{};if(Number(v.createdAt)&&Date.now()-Number(v.createdAt)>=30000){cleanupExpiredArenaInvite(c.key,v);}else social.arenaInvites.push({duelId:c.key,...v});});if(UI.tab==='arena'&&!B)render();});
   L2(FB.ref(FB.db,'arenaLeaderboard'),snap=>{social.arenaLeaderboard=[];snap.forEach(c=>social.arenaLeaderboard.push({uid:c.key,...c.val()}));social.arenaLeaderboard.sort((a,b)=>(b.points||1000)-(a.points||1000));if(UI.tab==='arena'&&!B)render();});
   L2(FB.ref(FB.db,'arenaStats/'+MY_UID),snap=>{if(snap.exists()){social.arenaStats=snap.val();}if(UI.tab==='arena'&&!B)render();});
   L2(FB.ref(FB.db,'arenaRecords/'+MY_UID),snap=>{social.arenaRecords=[];snap.forEach(c=>social.arenaRecords.push(c.val()));social.arenaRecords.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));if(UI.tab==='arena'&&!B)render();});
@@ -1748,6 +1751,30 @@ async function sendFriendRequest(targetUid){
 async function acceptFriend(fromUid){
   if(!socialReady())return;
   try{ await FB.set(FB.ref(FB.db,'friends/'+MY_UID+'/'+fromUid),true); await FB.set(FB.ref(FB.db,'friends/'+fromUid+'/'+MY_UID),true); await FB.remove(FB.ref(FB.db,'friendRequests/'+MY_UID+'/'+fromUid)); notify('已添加好友'); }catch(e){notify('操作失败');}
+}
+
+
+function removeBossMarker(index){
+  index=Number(index);if(!Number.isInteger(index)||index<0||index>=S.markedBosses.length)return;
+  const b=S.markedBosses.splice(index,1)[0];save();render();notify('已删除世界BOSS定位：'+(b?.name||'未知BOSS'));
+}
+async function removeFriend(uid){
+  if(!socialReady()||!uid||uid===MY_UID)return;
+  const f=social.friends.find(x=>x.uid===uid);const name=f?.name||'这位好友';
+  if(!confirm('确定删除好友「'+name+'」吗？双方好友列表都会移除，但聊天记录不会删除。'))return;
+  try{
+    const updates={};updates['friends/'+MY_UID+'/'+uid]=null;updates['friends/'+uid+'/'+MY_UID]=null;
+    await FB.update(FB.ref(FB.db),updates);
+    if(social.chatFriend===uid){social.chatFriend=null;social.chatMessages=[];if(social.chatUnsub){social.chatUnsub();social.chatUnsub=null;}}
+    notify('已删除好友：'+name);render();
+  }catch(e){console.warn(e);notify('删除好友失败，请检查数据库权限');}
+}
+function cleanupExpiredArenaInvite(id,invite){
+  if(!socialReady()||!id||!invite)return;
+  const created=Number(invite.createdAt)||0;
+  if(!created||Date.now()-created<30000)return;
+  FB.remove(FB.ref(FB.db,'arenaInvites/'+MY_UID+'/'+id)).catch(()=>{});
+  if(invite.fromUid)FB.update(FB.ref(FB.db,'duels/'+id),{status:'expired',endedAt:Date.now()}).catch(()=>{});
 }
 
 async function sendBossInvite(friendUid, boss){
@@ -1980,7 +2007,7 @@ function renderExplore(){
             <span class="iname"><span class="hl">${b.name}</span> <span class="small">Lv.${b.lv}</span><br>
               <span class="small">${b.region} (${b.x}, ${b.y})</span>
             </span>
-            <button data-act="openInvite" data-arg="${i}" style="padding:4px 10px;font-size:11px">邀请好友</button>
+            <span style="display:flex;gap:4px"><button data-act="openInvite" data-arg="${i}" style="padding:4px 10px;font-size:11px">邀请好友</button><button data-act="removeBossMarker" data-arg="${i}" style="padding:4px 8px;font-size:11px">删除定位</button></span>
           </div>
         `).join('') : '<div class="small">暂无标记</div>'}
       </div>
@@ -2284,7 +2311,7 @@ function renderChar(p){
 function renderInv(p){
   const matRows=Object.entries(MATS).filter(([k])=>(S.mats[k]||0)>0).map(([k,v])=>`<div class="resource-cell"><span>${v[1]} ${v[0]} ×${fmt(S.mats[k])}</span><button data-act="openResourceGift" data-arg="material:${k}" style="padding:3px 7px;font-size:10px">赠送</button></div>`).join('');
   const potionRows=Object.entries(POTIONS).filter(([k])=>(S.potions?.[k]||0)>0).map(([k,v])=>`<div class="resource-cell"><span>${v.icon} ${v.n} ×${S.potions[k]}</span><button data-act="openResourceGift" data-arg="potion:${k}" style="padding:3px 7px;font-size:10px">赠送</button></div>`).join('');
-  return `<h3 style="margin-bottom:10px">🎒 背包（${S.inv.length}/40）</h3><h4 style="font-size:13px;color:#b6a27b;margin:8px 0">已装备</h4>${SLOTS.map(s=>{const it=S.equip[s.id];return `<div class="item"><span style="width:26px">${s.icon}</span><span class="iname">${it?`<span class="rar${it.rar}">${escapeHtml(it.name)}</span> <span class="hl">+${it.enhanceLevel||0}</span>${it.slot==='weapon'?' <span class="small">（'+reqLabel(it)+'）</span>':''}<br><span class="small">${statLine(it)}</span>`:'<span class="small">— 空 —</span>'}</span>${it?`<button data-act="unequip" data-arg="${s.id}" style="padding:3px 8px;font-size:11px">卸下</button>`:''}</div>`;}).join('')}<h4 style="font-size:13px;color:#b6a27b;margin:14px 0 8px">装备物品 <span class="small">▲提升 ▼下降</span></h4>${S.inv.length?S.inv.map((it,i)=>{const cur=S.equip[it.slot];const better=!cur||equipScore(it)>equipScore(cur);const ok=it.slot==='weapon'?canEquip(it):true;return `<div class="item" style="flex-wrap:wrap"><span style="width:26px">${SLOTS.find(x=>x.id===it.slot).icon}</span><span class="iname" style="flex:1 1 200px"><span class="rar${it.rar}">${escapeHtml(it.name)}</span> <span class="hl">+${it.enhanceLevel||0}</span><span class="small"> Lv.${it.lvl} · ${RAR[it.rar].n}</span>${better?'<span style="color:#7fd4a0;font-weight:bold"> ↑推荐</span>':''}${it.slot==='weapon'?`<span class="small ${ok?'ok':'danger'}">（${reqLabel(it)}${ok?'':'·职业不符'}）</span>`:''}<br><span class="small">${statCompare(it)}</span></span><span style="display:flex;gap:4px;flex-wrap:wrap"><button data-act="equip" data-arg="${i}" ${ok?'':'disabled'} style="padding:3px 8px;font-size:11px">装备</button><button data-act="sell" data-arg="${i}" style="padding:3px 8px;font-size:11px">出售</button><button data-act="gift" data-arg="${i}" style="padding:3px 8px;font-size:11px;background:#241c14;color:var(--gold)">赠送</button></span></div>`;}).join(''):'<div class="small">空空如也</div>'}<div class="card" style="margin-top:14px"><h4 style="font-size:13px;color:#b6a27b;margin-bottom:8px">🧰 材料仓库 · 可赠送</h4><div class="resource-grid">${matRows||'<div class="small">暂无材料</div>'}</div></div><div class="card"><h4 style="font-size:13px;color:#b6a27b;margin-bottom:8px">🧪 消耗品 · 可赠送</h4><div class="resource-grid">${potionRows||'<div class="small">暂无药水</div>'}</div></div>`;
+  return `<h3 style="margin-bottom:10px">🎒 背包（${S.inv.length}/40）</h3><h4 style="font-size:13px;color:#b6a27b;margin:8px 0">已装备</h4>${SLOTS.map(s=>{const it=S.equip[s.id];return `<div class="item"><span style="width:26px">${s.icon}</span><span class="iname">${it?`<span class="rar${it.rar}">${escapeHtml(it.name)}</span> <span class="hl">+${it.enhanceLevel||0}</span>${it.slot==='weapon'?' <span class="small">（'+reqLabel(it)+'）</span>':''}<br><span class="small">${statLine(it)}</span>`:'<span class="small">— 空 —</span>'}</span>${it?`<button data-act="unequip" data-arg="${s.id}" style="padding:3px 8px;font-size:11px">卸下</button>`:''}</div>`;}).join('')}<div class="flex" style="margin:10px 0 6px"><button data-act="bulkDeleteJunk" style="padding:7px 10px;background:#38201c;border-color:#8a453b;color:#ffc1b1">🗑 一键清理普通/优秀装备</button><span class="small">只清理品质普通、优秀（不影响已装备物品）</span></div><h4 style="font-size:13px;color:#b6a27b;margin:14px 0 8px">装备物品 <span class="small">▲提升 ▼下降</span></h4>${S.inv.length?S.inv.map((it,i)=>{const cur=S.equip[it.slot];const better=!cur||equipScore(it)>equipScore(cur);const ok=it.slot==='weapon'?canEquip(it):true;return `<div class="item" style="flex-wrap:wrap"><span style="width:26px">${SLOTS.find(x=>x.id===it.slot).icon}</span><span class="iname" style="flex:1 1 200px"><span class="rar${it.rar}">${escapeHtml(it.name)}</span> <span class="hl">+${it.enhanceLevel||0}</span><span class="small"> Lv.${it.lvl} · ${RAR[it.rar].n}</span>${better?'<span style="color:#7fd4a0;font-weight:bold"> ↑推荐</span>':''}${it.slot==='weapon'?`<span class="small ${ok?'ok':'danger'}">（${reqLabel(it)}${ok?'':'·职业不符'}）</span>`:''}<br><span class="small">${statCompare(it)}</span></span><span style="display:flex;gap:4px;flex-wrap:wrap"><button data-act="equip" data-arg="${i}" ${ok?'':'disabled'} style="padding:3px 8px;font-size:11px">装备</button><button data-act="sell" data-arg="${i}" style="padding:3px 8px;font-size:11px">出售</button><button data-act="gift" data-arg="${i}" style="padding:3px 8px;font-size:11px;background:#241c14;color:var(--gold)">赠送</button></span></div>`;}).join(''):'<div class="small">空空如也</div>'}<div class="card" style="margin-top:14px"><h4 style="font-size:13px;color:#b6a27b;margin-bottom:8px">🧰 材料仓库 · 可赠送</h4><div class="resource-grid">${matRows||'<div class="small">暂无材料</div>'}</div></div><div class="card"><h4 style="font-size:13px;color:#b6a27b;margin-bottom:8px">🧪 消耗品 · 可赠送</h4><div class="resource-grid">${potionRows||'<div class="small">暂无药水</div>'}</div></div>`;
 }
 
 function renderDungeon(){
@@ -2365,7 +2392,7 @@ function renderSocial(){
 
   <div class="card"><h3 style="margin-bottom:8px">添加好友</h3><div style="display:flex;gap:6px"><input id="friendUidInput" placeholder="粘贴对方 UID…" style="font-size:12px"><button data-hc="sendReq" style="padding:8px 12px;white-space:nowrap">发送请求</button></div></div>
   ${social.requests.length?`<div class="card"><h3 style="margin-bottom:8px">待处理请求（${social.requests.length}）</h3>${social.requests.map(r=>`<div class="item"><span class="iname"><span class="hl">${escapeHtml(r.name||r.uid.slice(0,8))}</span> <span class="small">请求加你为好友</span></span><button data-hc="acceptFriend" data-arg="${escapeHtml(r.uid)}" style="padding:4px 10px;font-size:11px">接受</button></div>`).join('')}</div>`:''}
-  <div class="card"><h3 style="margin-bottom:8px">好友列表（${social.friends.length}）</h3>${social.friends.length?social.friends.map(f=>`<div class="item"><span class="dot" style="background:${f.online?'#4a7c59':'#5a3a3a'}"></span><span class="iname"><span class="hl">${escapeHtml(f.name)}</span><span class="small">Lv.${Number(f.level)||0} · 战力 ${fmt(f.power||0)} · ${escapeHtml(f.adv)}</span></span><button data-hc="openChat" data-arg="${escapeHtml(f.uid)}" style="padding:4px 10px;font-size:11px">聊天</button></div>`).join(''):'<div class="small">还没有好友，把你的 UID 发给朋友吧。</div>'}</div>
+  <div class="card"><h3 style="margin-bottom:8px">好友列表（${social.friends.length}）</h3>${social.friends.length?social.friends.map(f=>`<div class="item"><span class="dot" style="background:${f.online?'#4a7c59':'#5a3a3a'}"></span><span class="iname"><span class="hl">${escapeHtml(f.name)}</span><span class="small">Lv.${Number(f.level)||0} · 战力 ${fmt(f.power||0)} · ${escapeHtml(f.adv)}</span></span><span style="display:flex;gap:4px"><button data-hc="openChat" data-arg="${escapeHtml(f.uid)}" style="padding:4px 10px;font-size:11px">聊天</button><button data-act="removeFriend" data-arg="${escapeHtml(f.uid)}" style="padding:4px 8px;font-size:11px">删除好友</button></span></div>`).join(''):'<div class="small">还没有好友，把你的 UID 发给朋友吧。</div>'}</div>
   ${social.chatFriend?`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3>💬 ${chatFriendData?escapeHtml(chatFriendData.name):'好友'}</h3><button data-act="closeChat" style="padding:4px 10px;font-size:11px">关闭</button></div><div id="chatBox" class="chat-box">${social.chatMessages.length?social.chatMessages.map(m=>`<div class="chat-msg ${m.from===MY_UID?'me':'other'}"><span class="chat-bubble">${escapeHtml(m.text)}</span></div>`).join(''):'<div class="small">还没有消息</div>'}</div><div style="display:flex;gap:6px"><input id="chatInput" placeholder="输入消息…" style="font-size:12px" onkeydown="if(event.key==='Enter'&&!event.isComposing&&event.keyCode!==229){sendChatMessage(this.value);this.value=''}"><button data-hc="sendChatMsg" style="padding:8px 12px;white-space:nowrap">发送</button></div></div>`:''}
   
   <div class="card">
@@ -2409,9 +2436,9 @@ async function challengeFriend(uid){
   const id=FB.push(FB.ref(FB.db,'duels')).key,now=Date.now();
   if(!id){notify('竞技场连接失败');return;}
   const p1=createDuelSnapshot();
-  const duel={id,status:'pending',createdAt:now,fromUid:MY_UID,toUid:uid,p1,p2:{uid,name:friend.name||'好友',level:Number(friend.level)||1,cls:friend.cls||'sword',className:friend.adv||'冒险者',icon:CLASSES[friend.cls]?.icon||'⚔️',power:Number(friend.power)||0,stats:{hp:100,mp:40,atk:12,def:8,spd:8,crit:5},hp:100,mp:40,skills:[]},turnUid:null,turnCount:0,log:[],buffs:{}};
-  const updates={};updates['duels/'+id]=duel;updates['arenaInvites/'+uid+'/'+id]={duelId:id,fromUid:MY_UID,fromName:S.name,fromLevel:S.level,fromClass:p1.className,fromPower:p1.power,createdAt:now};
-  try{await FB.update(FB.ref(FB.db),updates);S.activeDuel=id;save();UI.tab='arena';attachDuelListener(id);render();notify('挑战已发送，等待好友应战');}
+  const duel={id,status:'pending',createdAt:now,expiresAt:now+30000,fromUid:MY_UID,toUid:uid,p1,p2:{uid,name:friend.name||'好友',level:Number(friend.level)||1,cls:friend.cls||'sword',className:friend.adv||'冒险者',icon:CLASSES[friend.cls]?.icon||'⚔️',power:Number(friend.power)||0,stats:{hp:100,mp:40,atk:12,def:8,spd:8,crit:5},hp:100,mp:40,skills:[]},turnUid:null,turnCount:0,log:[],buffs:{}};
+  const updates={};updates['duels/'+id]=duel;updates['arenaInvites/'+uid+'/'+id]={duelId:id,fromUid:MY_UID,fromName:S.name,fromLevel:S.level,fromClass:p1.className,fromPower:p1.power,createdAt:now,expiresAt:now+30000};
+  try{await FB.update(FB.ref(FB.db),updates);S.activeDuel=id;save();UI.tab='arena';attachDuelListener(id);render();notify('挑战已发送；对方需在30秒内回应');setTimeout(async()=>{try{const snap=await FB.get(FB.ref(FB.db,'duels/'+id));const cur=snap.exists()?snap.val():null;if(cur&&cur.status==='pending'&&cur.fromUid===MY_UID&&Date.now()>=now+30000){await FB.update(FB.ref(FB.db,'duels/'+id),{status:'expired',endedAt:Date.now()});await FB.remove(FB.ref(FB.db,'arenaInvites/'+uid+'/'+id));if(S.activeDuel===id){S.activeDuel=null;social.activeDuelData=null;save();if(UI.tab==='arena')render();}}}catch(e){console.warn('挑战过期清理失败',e);}},30000);}
   catch(e){console.warn(e);notify('挑战发送失败，请检查 Firebase 数据库权限');}
 }
 async function acceptDuel(id){
@@ -2442,6 +2469,12 @@ function attachDuelListener(id){
   if(social.duelUnsub){try{social.duelUnsub();}catch(e){}social.duelUnsub=null;}
   social.duelUnsub=FB.onValue(FB.ref(FB.db,'duels/'+id),snap=>{
     social.activeDuelData=snap.exists()?{id,...snap.val()}:null;
+    const pending=social.activeDuelData;
+    if(pending?.status==='pending'&&Number(pending.createdAt)&&Date.now()-Number(pending.createdAt)>=30000){
+      FB.update(FB.ref(FB.db,'duels/'+id),{status:'expired',endedAt:Date.now()}).catch(()=>{});
+      if(pending.toUid)FB.remove(FB.ref(FB.db,'arenaInvites/'+pending.toUid+'/'+id)).catch(()=>{});
+      if(pending.fromUid)FB.remove(FB.ref(FB.db,'arenaInvites/'+pending.fromUid+'/'+id)).catch(()=>{});
+    }
     if(social.activeDuelData?.status==='finished')recordDuelResult(social.activeDuelData);
     if(UI.tab==='arena'&&!B)render();
   },err=>{console.warn(err);notify('竞技场连接中断');});
@@ -2515,13 +2548,14 @@ function renderArena(){
   const st=social.arenaStats||{},history=social.arenaRecords||[],board=social.arenaLeaderboard||[],invites=social.arenaInvites||[];
   const total=(st.wins||0)+(st.losses||0)+(st.draws||0),rate=total?Math.round((st.wins||0)/total*100):0;
   const d=social.activeDuelData,me=d?(d.p1?.uid===MY_UID?d.p1:d.p2?.uid===MY_UID?d.p2:null):null,foe=d?(d.p1?.uid===MY_UID?d.p2:d.p1):null;
+  const liveInvites=invites.filter(x=>{const at=Number(x.createdAt)||0;if(!at||Date.now()-at>=30000){cleanupExpiredArenaInvite(x.duelId,x);return false;}return true;});
   let active='';
   if(d&&me&&foe){
     const mine=d.status==='active'&&d.turnUid===MY_UID;
-    active=`<div class="arena-panel"><div class="row"><span class="k">当前对局</span><span class="v">${d.status==='pending'?'等待应战':d.status==='active'?'第 '+(d.round||1)+' 回合':d.status==='finished'?'已结束':d.status==='declined'?'已拒绝':'已结束'}</span></div><div class="grid" style="grid-template-columns:1fr 1fr;margin:10px 0"><div class="arena-player"><div class="center" style="font-size:25px">${me.icon||'⚔️'}</div><div class="center hl">${escapeHtml(me.name)}</div><div class="small center">Lv.${me.level} · ${fmt(me.power||0)} 战力</div><div class="bar"><div class="hpfill" style="width:${clamp(me.hp/me.stats.hp*100,0,100)}%"></div><span>${fmt(me.hp)} / ${fmt(me.stats.hp)}</span></div><div class="small">斗气 ${fmt(me.mp)} / ${fmt(me.stats.mp)}</div></div><div class="arena-player"><div class="center" style="font-size:25px">${foe.icon||'⚔️'}</div><div class="center hl">${escapeHtml(foe.name)}</div><div class="small center">Lv.${foe.level} · ${fmt(foe.power||0)} 战力</div><div class="bar"><div class="hpfill" style="width:${clamp(foe.hp/foe.stats.hp*100,0,100)}%"></div><span>${fmt(foe.hp)} / ${fmt(foe.stats.hp)}</span></div><div class="small">斗气 ${fmt(foe.mp)} / ${fmt(foe.stats.mp)}</div></div></div>${d.status==='pending'?'<div class="small center">挑战请求已送出，等待对方接受。</div>':d.status==='active'?`<div class="center hl" style="margin:6px 0">${mine?'轮到你行动':'等待对手行动'}</div>${mine?`<div class="small" style="margin-bottom:6px">选择技能发动攻击、治疗或强化。双方交替行动，最多 40 次动作。</div>${(me.skills||[]).map((sk,i)=>`<button class="skill-btn arena-action" data-act="duelSkill" data-arg="${i}" ${me.mp<sk.mp?'disabled':''}><span>${escapeHtml(sk.n)}</span><small>${sk.mp?sk.mp+' 斗气':'无消耗'} · ${escapeHtml(sk.d||'')}</small></button>`).join('')}<button class="skill-btn" data-act="duelGuard"><span>🛡️ 防御架势</span><small>提升防御，消耗 0 斗气</small></button>`:'<div class="small center">对手正在思考下一步……刷新会自动同步战况。</div>'}`:`<div class="center hl">${d.status==='declined'?'对方拒绝了本次挑战。':d.winnerUid===MY_UID?'🏆 你赢得了本场单挑！':d.winnerUid?'本场落败，再接再厉。':'本场平局。'}</div><div class="small center">${d.status==='declined'?'未计入战绩。':'结果已计入战绩与积分。'}</div>`}<div class="chat-box" style="max-height:180px;margin-top:10px">${(d.log||[]).slice(-18).map(x=>`<div class="small" style="color:${x.uid===MY_UID?'#9de0cb':x.uid==='system'?'#e5bd72':'#c1a6e8'}">${escapeHtml(x.text)}</div>`).join('')||'<div class="small">等待对局开始…</div>'}</div><div class="flex"><button data-act="arenaRefresh">刷新对局</button>${d.status==='finished'||d.status==='declined'?'<button data-act="arenaClear">清除当前对局</button>':''}</div></div>`;
+    active=`<div class="arena-panel"><div class="row"><span class="k">当前对局</span><span class="v">${d.status==='pending'?'等待应战':d.status==='expired'?'邀请已过期':d.status==='active'?'第 '+(d.round||1)+' 回合':d.status==='finished'?'已结束':d.status==='declined'?'已拒绝':'已结束'}</span></div><div class="grid" style="grid-template-columns:1fr 1fr;margin:10px 0"><div class="arena-player"><div class="center" style="font-size:25px">${me.icon||'⚔️'}</div><div class="center hl">${escapeHtml(me.name)}</div><div class="small center">Lv.${me.level} · ${fmt(me.power||0)} 战力</div><div class="bar"><div class="hpfill" style="width:${clamp(me.hp/me.stats.hp*100,0,100)}%"></div><span>${fmt(me.hp)} / ${fmt(me.stats.hp)}</span></div><div class="small">斗气 ${fmt(me.mp)} / ${fmt(me.stats.mp)}</div></div><div class="arena-player"><div class="center" style="font-size:25px">${foe.icon||'⚔️'}</div><div class="center hl">${escapeHtml(foe.name)}</div><div class="small center">Lv.${foe.level} · ${fmt(foe.power||0)} 战力</div><div class="bar"><div class="hpfill" style="width:${clamp(foe.hp/foe.stats.hp*100,0,100)}%"></div><span>${fmt(foe.hp)} / ${fmt(foe.stats.hp)}</span></div><div class="small">斗气 ${fmt(foe.mp)} / ${fmt(foe.stats.mp)}</div></div></div>${d.status==='pending'?'<div class="small center">挑战请求已送出；对方需在30秒内接受，超时自动撤销。</div>':d.status==='active'?`<div class="center hl" style="margin:6px 0">${mine?'轮到你行动':'等待对手行动'}</div>${mine?`<div class="small" style="margin-bottom:6px">选择技能发动攻击、治疗或强化。双方交替行动，最多 40 次动作。</div>${(me.skills||[]).map((sk,i)=>`<button class="skill-btn arena-action" data-act="duelSkill" data-arg="${i}" ${me.mp<sk.mp?'disabled':''}><span>${escapeHtml(sk.n)}</span><small>${sk.mp?sk.mp+' 斗气':'无消耗'} · ${escapeHtml(sk.d||'')}</small></button>`).join('')}<button class="skill-btn" data-act="duelGuard"><span>🛡️ 防御架势</span><small>提升防御，消耗 0 斗气</small></button>`:'<div class="small center">对手正在思考下一步……刷新会自动同步战况。</div>'}`:`<div class="center hl">${d.status==='expired'?'对方30秒内未回应，邀请已自动撤销。':d.status==='declined'?'对方拒绝了本次挑战。':d.winnerUid===MY_UID?'🏆 你赢得了本场单挑！':d.winnerUid?'本场落败，再接再厉。':'本场平局。'}</div><div class="small center">${['declined','expired'].includes(d.status)?'未计入战绩。':'结果已计入战绩与积分。'}</div>`}<div class="chat-box" style="max-height:180px;margin-top:10px">${(d.log||[]).slice(-18).map(x=>`<div class="small" style="color:${x.uid===MY_UID?'#9de0cb':x.uid==='system'?'#e5bd72':'#c1a6e8'}">${escapeHtml(x.text)}</div>`).join('')||'<div class="small">等待对局开始…</div>'}</div><div class="flex"><button data-act="arenaRefresh">刷新对局</button>${['finished','declined','expired'].includes(d.status)?'<button data-act="arenaClear">清除当前对局</button>':''}</div></div>`;
   }
   return `<div class="arena-panel"><div style="display:flex;justify-content:space-between;align-items:center"><h3>⚔ 铁冠竞技场</h3><span class="tag">好友 1v1</span></div><div class="grid" style="grid-template-columns:repeat(4,1fr);margin-top:10px"><div class="arena-player center"><div class="small">胜场</div><div class="hl" style="font-size:22px">${st.wins||0}</div></div><div class="arena-player center"><div class="small">负场</div><div class="hl" style="font-size:22px">${st.losses||0}</div></div><div class="arena-player center"><div class="small">平局</div><div class="hl" style="font-size:22px">${st.draws||0}</div></div><div class="arena-player center"><div class="small">积分</div><div class="hl" style="font-size:22px">${st.points||1000}</div></div></div><div class="row"><span class="k">总场次 / 胜率</span><span class="v">${total} 场 · ${rate}%</span></div><div class="small" style="margin-top:8px">规则：好友互相接受后开始回合制单挑；速度决定先手，技能消耗斗气，击倒对方获胜；40 次动作后按剩余生命比例判定。胜利 +20 积分，失败 -12，平局 +5。</div></div>${active}
-  ${invites.length?`<div class="card"><h3 style="margin-bottom:8px">📩 挑战邀请（${invites.length}）</h3>${invites.map(x=>`<div class="item"><span class="iname"><span class="hl">${escapeHtml(x.fromName)}</span><br><span class="small">Lv.${x.fromLevel||1} · ${escapeHtml(x.fromClass||'冒险者')} · 战力 ${fmt(x.fromPower||0)}</span></span><button data-act="acceptDuel" data-arg="${x.duelId}" style="padding:6px 10px">应战</button><button data-act="declineDuel" data-arg="${x.duelId}" style="padding:6px 10px">拒绝</button></div>`).join('')}</div>`:''}
+  ${liveInvites.length?`<div class="card"><h3 style="margin-bottom:8px">📩 挑战邀请（${liveInvites.length}）</h3>${liveInvites.map(x=>`<div class="item"><span class="iname"><span class="hl">${escapeHtml(x.fromName)}</span><br><span class="small">Lv.${x.fromLevel||1} · ${escapeHtml(x.fromClass||'冒险者')} · 战力 ${fmt(x.fromPower||0)}</span></span><button data-act="acceptDuel" data-arg="${x.duelId}" style="padding:6px 10px">应战</button><button data-act="declineDuel" data-arg="${x.duelId}" style="padding:6px 10px">拒绝</button></div>`).join('')}</div>`:''}
   <div class="card"><h3 style="margin-bottom:8px">好友对手</h3>${social.friends.length?social.friends.map(f=>`<div class="item"><span class="dot" style="background:${f.online?'#4a7c59':'#5a3a3a'}"></span><span class="iname"><span class="hl">${escapeHtml(f.name)}</span><br><span class="small">Lv.${Number(f.level)||0} · 战力 ${fmt(f.power||0)} · ${f.online?'在线':'离线'}</span></span><button data-act="challengeFriend" data-arg="${f.uid}" style="padding:6px 10px">发起单挑</button></div>`).join(''):'<div class="small">先到社交页面添加好友，再邀请对方单挑。</div>'}</div>
   <div class="card"><h3 style="margin-bottom:8px">🏆 竞技场排行榜 Top 50</h3>${board.length?board.slice().sort((a,b)=>(b.points||1000)-(a.points||1000)).slice(0,50).map((x,i)=>`<div class="row"><span class="k">${i+1}. ${escapeHtml(x.name||'冒险者')} ${x.uid===MY_UID?'<span class="hl">（你）</span>':''}</span><span class="v small">${x.points||1000} 分 · ${x.wins||0} 胜</span></div>`).join(''):'<div class="small">暂无竞技场记录，完成第一场单挑后上榜。</div>'}</div>
   <div class="card"><h3 style="margin-bottom:8px">📜 我的单挑战绩</h3>${history.length?history.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,30).map(x=>`<div class="row"><span class="k">${escapeHtml(x.opponent||'好友')} · ${x.result}</span><span class="v small">${new Date(x.createdAt||Date.now()).toLocaleString()}</span></div>`).join(''):'<div class="small">尚无战绩。</div>'}</div>`;
@@ -2701,6 +2735,9 @@ root.addEventListener('click', async ev => {
     case 'refreshWeaponShop': {if(S.gold<WEAPON_REFRESH_COST){notify('金币不足');return;}S.gold-=WEAPON_REFRESH_COST;refreshWeaponStock();save();render();notify('武器已刷新');break;}
     case 'buyWeapon': {const idx=parseInt(arg);if(!S.weaponStock)return;const it=S.weaponStock[idx];if(!it)return;if(S.gold<it.shopPrice){notify('金币不足');return;}if(S.inv.length>=40){notify('背包已满');return;}S.gold-=it.shopPrice;const copy=JSON.parse(JSON.stringify(it));delete copy.shopPrice;S.inv.push(copy);S.weaponStock.splice(idx,1);save();render();notify('购买 '+copy.name);break;}
     case 'openInvite': UI.inviteBoss=parseInt(arg); render(); break;
+    case 'removeBossMarker': removeBossMarker(arg); break;
+    case 'removeFriend': removeFriend(arg); break;
+    case 'bulkDeleteJunk': {const n=S.inv.filter(it=>Number(it.rar)<=1).length;if(!n){notify('没有可清理的普通/优秀装备');break;}if(confirm('确定一键删除 '+n+' 件普通/优秀装备吗？稀有及以上装备和已装备物品不会受影响。')){S.inv=S.inv.filter(it=>Number(it.rar)>1);save();render();notify('已清理 '+n+' 件低品质装备');}break;}
     case 'showAuth': UI.showAuthModal=true; UI.authMode='login'; render(); break;
     case 'switchAuth': UI.authMode = UI.authMode==='login'?'register':'login'; render(); break;
     case 'closeAuth': UI.showAuthModal=false; render(); break;
