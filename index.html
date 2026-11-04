@@ -1029,5 +1029,31 @@ function beginGame(){
   setTimeout(()=>waitForFirebase(0),800);
 })();
 </script>
+  /* 圣冠补丁 holycrown_patch.js
+   用法：放在主游戏 <script>…</script> 之后、</body> 之前：<script src="holycrown_patch.js"></script> */
+(function(){
+'use strict';
+const W=(n,f)=>{window[n]=f(window[n]);};
+const cl=s=>typeof s==='string'?s.replace(/[<>"'&`]/g,''):s;
+const hasCls=k=>!!S&&(S.cls===k||S.sub===k);
+const fmtT=ms=>{const s=Math.ceil(ms/1000);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
+const HC={};
+social.leaderboard=social.leaderboard||[];
+Object.assign(UI,{mix:[],bld:null,wander:null,inviteBoss:null,inCreate:false});
+
+/* ========== P0 修复：缺失函数 ========== */
+window.bar=function(cur,max,cls){
+  const pct=max>0?clamp(cur/max*100,0,100):0;
+  return `<div class="bar"><div class="${cls}" style="width:${pct}%"></div><span>${fmt(cur)} / ${fmt(max)}</span></div>`;
+};
+window.explore=function(){
+  const reg=REGIONS[UI.region];
+  if(Math.random()<0.65)startBattle(makeEnemy(pick(reg.enemies),Math.max(1,S.level+rnd(-2,2)),false));
+  else{const g=Math.round((20+S.level*15)*rf(.8,1.5));S.gold+=g;save();render();notify('发现宝箱 +'+fmt(g)+' CC');}
+};
+window.enterDungeon=function(i){
+  const d=DUNGEONS[i];if(!d)return;
+  if(S.level<Math.max(1,d.lv-5)){notify('等级不足');return;}
+  startBattle(makeEnemy(d.boss,d.lv,true),{dungeon:d});
 </body>
 </html>
