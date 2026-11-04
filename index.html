@@ -1231,7 +1231,8 @@ function renderGiftModal() {
 async function syncMyProfile(){
   if(!socialReady()||!S)return;
   try{
-    const profile={ name: S.name, level:S.level, power:calcPower(), cls:S.cls, adv:S.adv||CLASSES[S.cls].name, online:true, updatedAt:FB.serverTimestamp() };
+    const power = Number(calcPower()); // 强制数字
+    const profile={ name: S.name, level:S.level, power: power, cls:S.cls, adv:S.adv||CLASSES[S.cls].name, online:true, updatedAt:FB.serverTimestamp() };
     await FB.set(FB.ref(FB.db,'users/'+MY_UID),profile);
     await FB.set(FB.ref(FB.db,'leaderboard/'+MY_UID),profile);
     try{FB.onDisconnect(FB.ref(FB.db,'users/'+MY_UID+'/online')).set(false);FB.onDisconnect(FB.ref(FB.db,'leaderboard/'+MY_UID+'/online')).set(false);}catch(e){}
@@ -1267,8 +1268,17 @@ function startSocialListeners(){
     if(UI.showMailModal && !B) render();
   });
 
-  const q=FB.query(FB.ref(FB.db,'leaderboard'),FB.orderByChild('power'),FB.limitToLast(50));
-  L2(q,snap=>{social.leaderboard=[];snap.forEach(c=>social.leaderboard.push({uid:c.key,...c.val()}));social.leaderboard.reverse();if(UI.tab==='social'&&!B)render();});
+  // 修复：直接拉取全量，本地强制按数字降序排序，解决Firebase字符串排序错乱
+  L2(FB.ref(FB.db,'leaderboard'), snap => {
+    social.leaderboard = [];
+    snap.forEach(c => {
+        const val = c.val();
+        social.leaderboard.push({uid: c.key, ...val, power: Number(val.power) || 0});
+    });
+    social.leaderboard.sort((a, b) => b.power - a.power);
+    social.leaderboard = social.leaderboard.slice(0, 50); // 只显示前50
+    if(UI.tab==='social'&&!B)render();
+  });
 
   L2(FB.ref(FB.db,'guilds'),snap=>{social.allGuilds=[];snap.forEach(c=>social.allGuilds.push({id:c.key,...c.val()}));if(UI.tab==='guild'&&!B)render();});
 
