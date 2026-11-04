@@ -44,7 +44,7 @@ input:focus{outline:none;border-color:var(--gold)}
 .row:last-child{border-bottom:none}
 .row .k{color:#8a7a60}
 .row .v{color:var(--gold2);font-weight:600}
-.item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:3px;background:#100d0a;margin-bottom:6px;font-size:13px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:3px;background:#100d0a;margin-bottom:6px;font-size:13px;cursor:pointer}
 .item .iname{flex:1;min-width:0}
 .log{max-height:220px;overflow-y:auto;font-size:13px;line-height:1.7}
 .log div{padding:1px 0;border-bottom:1px solid rgba(58,47,34,.3)}
@@ -498,23 +498,23 @@ function renderAuthModal(){
         <input id="authEmail" type="email" placeholder="输入邮箱地址" style="margin-bottom:8px">
         <input id="authPass" type="password" placeholder="输入密码（至少6位）">
       </div>
-      <button onclick="doAuth('${UI.authMode}')" style="width:100%;padding:12px;margin-bottom:12px">${isLogin?'登 录':'注 册 并 登 录'}</button>
+      <button data-act="doAuth" style="width:100%;padding:12px;margin-bottom:12px">${isLogin?'登 录':'注 册 并 登 录'}</button>
       <div class="center">
-        <button onclick="UI.authMode='${isLogin?'register':'login'}';render()" style="background:none;border:none;color:var(--gold2);font-size:12px;text-decoration:underline">${isLogin?'没有账号？点此注册':'已有账号？点此登录'}</button>
-        <button onclick="UI.showAuthModal=false;render()" style="background:none;border:none;color:#7a6a52;font-size:12px;margin-left:10px">取消</button>
+        <button data-act="switchAuth" style="background:none;border:none;color:var(--gold2);font-size:12px;text-decoration:underline">${isLogin?'没有账号？点此注册':'已有账号？点此登录'}</button>
+        <button data-act="closeAuth" style="background:none;border:none;color:#7a6a52;font-size:12px;margin-left:10px">取消</button>
       </div>
     </div>
   </div>`;
 }
 
-async function doAuth(mode){
+async function doAuth(){
   const email = document.getElementById('authEmail').value.trim();
   const pass = document.getElementById('authPass').value.trim();
   if(!email || !pass) { notify('请填写邮箱和密码'); return; }
   if(pass.length < 6) { notify('密码至少6位'); return; }
 
   try {
-    if(mode === 'login') {
+    if(UI.authMode === 'login') {
       await window.AUTH_API.signInWithEmailAndPassword(window.FB.auth, email, pass);
       notify('登录成功，正在同步云存档...');
     } else {
@@ -760,7 +760,6 @@ async function winBattle(){
   if(e.isBoss&&Math.random()<0.5){S.shards=(S.shards||0)+1;B.reward.shards=1;B.log.push({t:'win',m:'✧ 获得「圣冠碎片」×1'});}
   S.kills++;checkTitles();levelUpCheck();
   
-  // 检查每日任务进度
   if(S.dailyQuests) {
     S.dailyQuests.forEach(q => {
       if(q.type === 'kill' && !q.done && q.target === e.name) {
@@ -771,7 +770,6 @@ async function winBattle(){
     });
   }
 
-  // 检查NPC任务进度
   if(S.quests){
     for(const qId in S.quests){
       const qState = S.quests[qId];
@@ -960,7 +958,6 @@ function submitQuest(npc) {
     state.status = 'done';
     save(); closeNpc();
     
-    // 借用战斗结算面板
     B = {
       enemy: { name: '任务奖励', isBoss: false, lv: S.level, hp: 1, maxHp: 1 },
       log: [{t:'win', m:'🎉 完成任务【'+q.title+'】！'}], over: true, busy: false, turn: 0, bossTurn: 0,
@@ -1056,13 +1053,13 @@ function renderMailModal() {
             <div class="small" style="color:#a855f7">来自：${escapeHtml(m.fromName)}</div>
             <div class="hl" style="margin:4px 0">${m.title}</div>
             <div class="small" style="margin-bottom:8px">${m.content}</div>
-            ${m.status === 'unread' && m.item ? `<button onclick="claimMail('${m.id}')" style="width:100%;background:#1d301d;border-color:#2a4a2a;color:#7fd4a0">提取附件</button>` : ''}
+            ${m.status === 'unread' && m.item ? `<button data-hc="claimMail" data-arg="${m.id}" style="width:100%;background:#1d301d;border-color:#2a4a2a;color:#7fd4a0">提取附件</button>` : ''}
             ${m.status === 'claimed' ? `<div class="small center ok">✓ 已领取</div>` : ''}
-            <div class="center" style="margin-top:8px"><button onclick="deleteMail('${m.id}')" style="font-size:11px;padding:2px 8px;background:none">删除</button></div>
+            <div class="center" style="margin-top:8px"><button data-hc="deleteMail" data-arg="${m.id}" style="font-size:11px;padding:2px 8px;background:none">删除</button></div>
           </div>
         `).join('') : '<div class="small center">空空如也</div>'}
       </div>
-      <button onclick="UI.showMailModal=false;render()" style="width:100%;margin-top:12px">关闭</button>
+      <button data-act="closeMail" style="width:100%;margin-top:12px">关闭</button>
     </div>
   </div>
   `;
@@ -1083,12 +1080,12 @@ function renderGiftModal() {
       <div class="small" style="margin-bottom:8px">选择赠送的好友：</div>
       <div style="max-height:200px;overflow-y:auto">
         ${friends.length ? friends.map(f => `
-          <button onclick="sendGift('${f.uid}', ${UI.showGiftModal})" style="width:100%;margin-bottom:6px;text-align:left">
+          <button data-hc="sendGift" data-arg="${f.uid}_${UI.showGiftModal}" style="width:100%;margin-bottom:6px;text-align:left">
             ${escapeHtml(f.name)} (Lv.${f.level})
           </button>
         `).join('') : '<div class="small">暂无好友</div>'}
       </div>
-      <button onclick="UI.showGiftModal=null;render()" style="width:100%;margin-top:12px">取消</button>
+      <button data-act="closeGift" style="width:100%;margin-top:12px">取消</button>
     </div>
   </div>
   `;
@@ -1119,7 +1116,6 @@ function startSocialListeners(){
     if(UI.tab==='social' && !B) render();
   });
 
-  // 实时监听邮件
   FB.onValue(FB.ref(FB.db, 'mails/' + MY_UID), snap => {
     social.mails = [];
     snap.forEach(c => social.mails.push({id: c.key, ...c.val()}));
@@ -1374,15 +1370,15 @@ function renderExplore(){
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <h3>🧭 ${WORLD_MAP[UI.curRegion].name} - 坐标 (${UI.wildPos.x}, ${UI.wildPos.y})</h3>
-        <button onclick="exitWild()" style="background:#3a1a1a;color:#e88a7a;border-color:#5a2a2a;padding:4px 8px;font-size:12px">离开野外</button>
+        <button data-act="exitWild" style="background:#3a1a1a;color:#e88a7a;border-color:#5a2a2a;padding:4px 8px;font-size:12px">离开野外</button>
       </div>
       <div class="wild-box">
         ${UI.wildLog.map(l=>`<div class="${l.t}" style="margin-bottom:4px">${l.m}</div>`).join('')}
       </div>
       <div class="wild-dir-btn">
-        <button onclick="wildMove('left')">⬅️ 向左</button>
-        <button onclick="wildMove('forward')" style="flex:2;background:#1d301d;color:#7fd4a0;border-color:#2a4a2a">⬆️ 向前</button>
-        <button onclick="wildMove('right')">➡️ 向右</button>
+        <button data-act="wildMove" data-arg="left">⬅️ 向左</button>
+        <button data-act="wildMove" data-arg="forward" style="flex:2;background:#1d301d;color:#7fd4a0;border-color:#2a4a2a">⬆️ 向前</button>
+        <button data-act="wildMove" data-arg="right">➡️ 向右</button>
       </div>
       <div class="card" style="margin-top:14px">
         <h3 style="margin-bottom:8px">📍 标记的世界BOSS</h3>
@@ -1391,7 +1387,7 @@ function renderExplore(){
             <span class="iname"><span class="hl">${b.name}</span> <span class="small">Lv.${b.lv}</span><br>
               <span class="small">${b.region} (${b.x}, ${b.y})</span>
             </span>
-            <button onclick="UI.inviteBoss=${i};render()" style="padding:4px 10px;font-size:11px">邀请好友</button>
+            <button data-act="openInvite" data-arg="${i}" style="padding:4px 10px;font-size:11px">邀请好友</button>
           </div>
         `).join('') : '<div class="small">暂无标记</div>'}
       </div>
@@ -1403,7 +1399,7 @@ function renderExplore(){
     return `<h3 style="margin-bottom:10px">🌍 阿斯米德约顿 - 世界地图</h3>
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">
       ${WORLD_MAP.map((r,i)=>`
-        <div class="cls-card" onclick="UI.curRegion=${i};UI.mapLevel='city';render()" style="padding:12px">
+        <div class="cls-card" data-act="nav" data-arg="region_${i}" style="padding:12px">
           <span class="ic" style="font-size:28px">${r.icon}</span>
           <div class="nm" style="font-size:14px">${r.name}</div>
           <div class="ds">推荐等级 ${r.minLv}-${r.maxLv}</div>
@@ -1419,12 +1415,12 @@ function renderExplore(){
     return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <h3>${reg.icon} ${reg.name}</h3>
-      <button onclick="exitCity()" style="background:none;border:none;color:var(--gold);font-size:12px">« 返回世界地图</button>
+      <button data-act="nav" data-arg="back_world" style="background:none;border:none;color:var(--gold);font-size:12px">« 返回世界地图</button>
     </div>
     <p class="small" style="margin-bottom:12px">${reg.desc}</p>
     <div class="grid">
       ${reg.cities.map((c,i)=>`
-        <div class="cls-card" onclick="UI.curCity=${i};UI.mapLevel='building';render()" style="padding:12px">
+        <div class="cls-card" data-act="nav" data-arg="city_${i}" style="padding:12px">
           <span class="ic" style="font-size:28px">${c.icon}</span>
           <div class="nm" style="font-size:14px">${c.name}</div>
         </div>
@@ -1439,11 +1435,11 @@ function renderExplore(){
     return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <h3>${city.icon} ${city.name}</h3>
-      <button onclick="UI.mapLevel='city';render()" style="background:none;border:none;color:var(--gold);font-size:12px">« 返回上级</button>
+      <button data-act="nav" data-arg="back_city" style="background:none;border:none;color:var(--gold);font-size:12px">« 返回上级</button>
     </div>
     <div class="grid">
       ${city.buildings.map(b=>`
-        <div class="cls-card" onclick="enterBuilding('${b.id}')" style="padding:12px">
+        <div class="cls-card" data-act="nav" data-arg="bld_${b.id}" style="padding:12px">
           <span class="ic" style="font-size:28px">${b.icon}</span>
           <div class="nm" style="font-size:14px">${b.name}</div>
         </div>
@@ -1460,11 +1456,10 @@ function renderExplore(){
   let interiorHtml = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <h3>${bld.icon} ${bld.name}</h3>
-      <button onclick="exitBuilding()" style="background:none;border:none;color:var(--gold);font-size:12px">« 返回城市</button>
+      <button data-act="nav" data-arg="back_building" style="background:none;border:none;color:var(--gold);font-size:12px">« 返回城市</button>
     </div>
   `;
 
-  // 根据不同建筑类型显示不同功能
   if(UI.curBuilding === 'gate') {
     interiorHtml += `
       <div class="flex" style="margin-bottom:12px">
@@ -1478,7 +1473,6 @@ function renderExplore(){
       </div>
     `;
   } else if(UI.curBuilding === 'tavern' || UI.curBuilding === 'guild') {
-    // 酒馆和公会包含日常悬赏板
     let qHtml = '';
     if(S.dailyQuests.length > 0) {
       qHtml = `<div class="card" style="background:#0f0c09;margin-top:12px">
@@ -1490,7 +1484,7 @@ function renderExplore(){
               <span class="small">（${q.type==='kill'?q.progress+'/'+q.req:q.req+' CC'}）</span><br>
               <span class="small">奖励：${q.rewardExp} 经验，${q.rewardGold} CC</span>
             </span>
-            ${q.done && !q.claimed ? `<button onclick="claimDailyQuest(${i})" style="width:100%;margin-top:8px;background:#1d301d;color:#7fd4a0">领取奖励</button>` : 
+            ${q.done && !q.claimed ? `<button data-hc="claimDaily" data-arg="${i}" style="width:100%;margin-top:8px;background:#1d301d;color:#7fd4a0">领取奖励</button>` : 
               (q.claimed ? `<div class="small ok center" style="width:100%;margin-top:8px">✓ 已完成</div>` : `<div class="small center" style="width:100%;margin-top:8px">进行中...</div>`)}
           </div>
         `).join('')}
@@ -1547,11 +1541,10 @@ function renderExplore(){
     }
   }
 
-  // 显示 NPC
   if (npcs.length > 0) {
     interiorHtml += `<div class="small" style="margin:14px 0 8px;color:#8a7a60">— 这里的人 —</div>`;
     interiorHtml += npcs.map(n => `
-      <div class="item" style="padding:12px" onclick="openNpc('${n.id}')">
+      <div class="item" style="padding:12px" data-act="nav" data-arg="npc_${n.id}">
         <span style="font-size:24px">${n.icon}</span>
         <span class="iname"><span class="hl" style="font-size:15px">${n.name}</span><br>
           <span class="small">${n.desc}</span>
@@ -1588,7 +1581,7 @@ function renderNpcModal(){
         <div class="hl" style="margin-bottom:4px">${q.title}</div>
         <div class="small" style="margin-bottom:8px">${q.desc}</div>
         <div class="small" style="margin-bottom:12px">奖励：经验 +${q.rewardExp}，金币 +${q.rewardGold}${q.title?'，称号【'+q.title+'】':''}</div>
-        <button onclick="acceptQuest(UI.activeNpc)" style="width:100%;background:#3d2e19;border-color:var(--gold)">接取任务</button>
+        <button data-hc="acceptQuest" style="width:100%;background:#3d2e19;border-color:var(--gold)">接取任务</button>
       `;
     } else if(state.status === 'doing') {
       let canSubmit = false;
@@ -1596,7 +1589,7 @@ function renderNpcModal(){
       if(q.type === 'collect' && S.gold >= q.req) canSubmit = true;
       h += `
         <div class="small" style="color:#f0b060;margin:8px 0">⏳ 任务进行中：${q.title}（${q.type==='kill'?state.progress+' / '+q.req:q.req+' CC'}）</div>
-        <button onclick="submitQuest(UI.activeNpc)" ${canSubmit?'':'disabled'} style="width:100%;background:#1d301d;border-color:#2a4a2a;color:#7fd4a0">${canSubmit?'提交任务':'尚未完成'}</button>
+        <button data-hc="submitQuest" ${canSubmit?'':'disabled'} style="width:100%;background:#1d301d;border-color:#2a4a2a;color:#7fd4a0">${canSubmit?'提交任务':'尚未完成'}</button>
       `;
     } else {
       h += `<div class="small" style="color:#7fd4a0;margin-top:8px">✓ 任务已完成</div>`;
@@ -1611,7 +1604,7 @@ function renderNpcModal(){
         <div class="center" style="font-size:32px;margin-bottom:8px">${n.icon}</div>
         <h3 class="center" style="margin-bottom:12px">${n.name}</h3>
         <div class="card" style="background:#0f0c09">${h}</div>
-        <button onclick="closeNpc()" style="width:100%;margin-top:8px">离开</button>
+        <button data-hc="closeNpc" style="width:100%;margin-top:8px">离开</button>
       </div>
     </div>
   `;
@@ -1658,11 +1651,11 @@ function renderGuild(){
     return `<div class="card" style="border-color:var(--gold)"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">🏰 ${escapeHtml(g.name)}</h3><span class="tag" style="border-color:var(--gold);color:var(--gold)">Lv.${lvl}</span></div><div class="small" style="margin-top:4px">会长：${escapeHtml(g.leaderName)}</div><div style="margin-top:12px"><div class="small">公会经验：${fmt(exp)} / ${fmt(nextNeed)}</div><div class="bar" style="height:8px"><div class="expfill" style="width:${expPct}%"></div></div></div><div class="small" style="margin-top:8px;color:#7fd4a0">✦ 当前公会加成：全队生命/攻击/防御/速度 +${lvl * 3}%</div></div>
     <div class="card"><h3 style="margin-bottom:8px;font-size:14px">捐献金币（1 CC = 1 经验）</h3><div class="flex"><button data-act="donateGuild" data-arg="1000" ${S.gold<1000?'disabled':''}>捐献 1000 CC</button><button data-act="donateGuild" data-arg="5000" ${S.gold<5000?'disabled':''}>捐献 5000 CC</button></div></div>
     <div class="card"><h3 style="margin-bottom:8px;font-size:14px">成员列表（${memberList.length}人）</h3>${memberList.map(m => `<div class="row"><span class="k">${m.role==='会长'?'👑 ':''}${escapeHtml(m.name)}</span><span class="v small">贡献：${fmt(m.contrib||0)}</span></div>`).join('')}</div>
-    <div class="center" style="margin-top:14px"><button onclick="leaveGuild()" style="background:#3a1a1a;color:#e88a7a;border-color:#5a2a2a">退出公会</button></div>`;
+    <div class="center" style="margin-top:14px"><button data-hc="leaveGuild" style="background:#3a1a1a;color:#e88a7a;border-color:#5a2a2a">退出公会</button></div>`;
   }
   const shopTab = UI.guildTab || 'list';
   return `<div class="tabs" style="margin-bottom:12px"><button class="${shopTab==='list'?'active':''}" data-act="guildTab" data-arg="list">全服公会</button><button class="${shopTab==='create'?'active':''}" data-act="guildTab" data-arg="create">创建公会</button></div>
-  ${shopTab==='create' ? `<div class="card"><h3 style="margin-bottom:8px">创建公会</h3><p class="small" style="margin-bottom:12px">消耗 <span class="hl">${fmt(CREATE_GUILD_COST)} CC</span> 建立属于你的公会。你将成为会长。</p><input id="guildNameInput" placeholder="输入公会名称（2-10字）" maxlength="10" style="margin-bottom:8px"><button onclick="createGuild(document.getElementById('guildNameInput').value)" style="width:100%;padding:12px" ${S.gold<CREATE_GUILD_COST?'disabled':''}>创建公会</button></div>` : `<div class="card"><h3 style="margin-bottom:8px">全服公会列表</h3>${social.allGuilds.length ? social.allGuilds.map(g => `<div class="item" style="padding:10px"><span class="iname"><span class="hl" style="font-size:15px">${escapeHtml(g.name)}</span> <span class="small">Lv.${g.level||1}</span><br><span class="small">会长：${escapeHtml(g.leaderName)} · 成员：${Object.keys(g.members||{}).length}人</span></span><button onclick="joinGuild('${g.id}')" style="padding:6px 12px">申请加入</button></div>`).join('') : '<div class="small">目前还没有人创建公会，你可以去建一个！</div>'}</div>`}`;
+  ${shopTab==='create' ? `<div class="card"><h3 style="margin-bottom:8px">创建公会</h3><p class="small" style="margin-bottom:12px">消耗 <span class="hl">${fmt(CREATE_GUILD_COST)} CC</span> 建立属于你的公会。你将成为会长。</p><input id="guildNameInput" placeholder="输入公会名称（2-10字）" maxlength="10" style="margin-bottom:8px"><button data-hc="createGuild" style="width:100%;padding:12px" ${S.gold<CREATE_GUILD_COST?'disabled':''}>创建公会</button></div>` : `<div class="card"><h3 style="margin-bottom:8px">全服公会列表</h3>${social.allGuilds.length ? social.allGuilds.map(g => `<div class="item" style="padding:10px"><span class="iname"><span class="hl" style="font-size:15px">${escapeHtml(g.name)}</span> <span class="small">Lv.${g.level||1}</span><br><span class="small">会长：${escapeHtml(g.leaderName)} · 成员：${Object.keys(g.members||{}).length}人</span></span><button data-hc="joinGuild" data-arg="${g.id}" style="padding:6px 12px">申请加入</button></div>`).join('') : '<div class="small">目前还没有人创建公会，你可以去建一个！</div>'}</div>`}`;
 }
 
 function renderShop(p){
@@ -1697,8 +1690,8 @@ function renderSocial(){
     <div class="row"><span class="k">我的名字</span><span class="v">${escapeHtml(S.name)}</span></div>
     <div class="row"><span class="k">等级 / 战力</span><span class="v">Lv.${S.level} · ${fmt(myPower)}</span></div>
     <div class="row"><span class="k">账号状态</span><span class="v">${window.MY_IS_ANON?'游客（未绑定邮箱）':window.MY_EMAIL}</span></div>
-    <div style="margin-top:8px"><div class="small" style="margin-bottom:4px">我的 UID（发给朋友添加你）</div><div style="display:flex;gap:6px"><input id="myUidBox" value="${MY_UID}" readonly style="font-size:11px;font-family:monospace"><button onclick="navigator.clipboard.writeText('${MY_UID}');notify('已复制 UID')" style="padding:8px 12px;white-space:nowrap">复制</button></div></div>
-    <div style="margin-top:10px"><button onclick="if(socialReady()){syncMyProfile();notify('已刷新资料至排行榜')}" style="width:100%;padding:10px;background:#1d301d;color:#7fd4a0;border-color:#2a4a2a">🔄 强制刷新我的资料到排行榜</button></div>
+    <div style="margin-top:8px"><div class="small" style="margin-bottom:4px">我的 UID（发给朋友添加你）</div><div style="display:flex;gap:6px"><input id="myUidBox" value="${MY_UID}" readonly style="font-size:11px;font-family:monospace"><button data-hc="copyUid" data-arg="${MY_UID}" style="padding:8px 12px;white-space:nowrap">复制</button></div></div>
+    <div style="margin-top:10px"><button data-act="syncProfile" style="width:100%;padding:10px;background:#1d301d;color:#7fd4a0;border-color:#2a4a2a">🔄 强制刷新我的资料到排行榜</button></div>
   </div>
   
   ${social.invites.length ? `
@@ -1709,15 +1702,15 @@ function renderSocial(){
         <span class="iname"><span class="hl">${escapeHtml(inv.fromName)}</span> 邀请你挑战<br>
           <span class="small">${escapeHtml(inv.bossName)} (Lv.${inv.lv}) - ${escapeHtml(inv.region)} (${inv.x},${inv.y})</span>
         </span>
-        <button onclick="alert('已接受，请前往野外寻找！')" style="padding:4px 10px;font-size:11px">接受</button>
+        <button data-hc="acceptInvite" style="padding:4px 10px;font-size:11px">接受</button>
       </div>
     `).join('')}
   </div>` : ''}
 
-  <div class="card"><h3 style="margin-bottom:8px">添加好友</h3><div style="display:flex;gap:6px"><input id="friendUidInput" placeholder="粘贴对方 UID…" style="font-size:12px"><button onclick="sendFriendRequest(document.getElementById('friendUidInput').value.trim())" style="padding:8px 12px;white-space:nowrap">发送请求</button></div></div>
-  ${social.requests.length?`<div class="card"><h3 style="margin-bottom:8px">待处理请求（${social.requests.length}）</h3>${social.requests.map(r=>`<div class="item"><span class="iname"><span class="hl">${escapeHtml(r.name||r.uid.slice(0,8))}</span> <span class="small">请求加你为好友</span></span><button onclick="acceptFriend('${r.uid}')" style="padding:4px 10px;font-size:11px">接受</button></div>`).join('')}</div>`:''}
-  <div class="card"><h3 style="margin-bottom:8px">好友列表（${social.friends.length}）</h3>${social.friends.length?social.friends.map(f=>`<div class="item"><span class="dot" style="background:${f.online?'#4a7c59':'#5a3a3a'}"></span><span class="iname"><span class="hl">${escapeHtml(f.name)}</span><span class="small">Lv.${f.level} · 战力 ${fmt(f.power||0)} · ${f.adv||''}</span></span><button onclick="openChat('${f.uid}')" style="padding:4px 10px;font-size:11px">聊天</button></div>`).join(''):'<div class="small">还没有好友，把你的 UID 发给朋友吧。</div>'}</div>
-  ${social.chatFriend?`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3>💬 ${chatFriendData?escapeHtml(chatFriendData.name):'好友'}</h3><button onclick="social.chatFriend=null;social.chatMessages=[];if(social.chatUnsub){social.chatUnsub();social.chatUnsub=null;}render()" style="padding:4px 10px;font-size:11px">关闭</button></div><div id="chatBox" class="chat-box">${social.chatMessages.length?social.chatMessages.map(m=>`<div class="chat-msg ${m.from===MY_UID?'me':'other'}"><span class="chat-bubble">${escapeHtml(m.text)}</span></div>`).join(''):'<div class="small">还没有消息</div>'}</div><div style="display:flex;gap:6px"><input id="chatInput" placeholder="输入消息…" style="font-size:12px" onkeydown="if(event.key==='Enter'){sendChatMessage(this.value);this.value=''}"><button onclick="const i=document.getElementById('chatInput');sendChatMessage(i.value);i.value=''" style="padding:8px 12px;white-space:nowrap">发送</button></div></div>`:''}
+  <div class="card"><h3 style="margin-bottom:8px">添加好友</h3><div style="display:flex;gap:6px"><input id="friendUidInput" placeholder="粘贴对方 UID…" style="font-size:12px"><button data-hc="sendReq" style="padding:8px 12px;white-space:nowrap">发送请求</button></div></div>
+  ${social.requests.length?`<div class="card"><h3 style="margin-bottom:8px">待处理请求（${social.requests.length}）</h3>${social.requests.map(r=>`<div class="item"><span class="iname"><span class="hl">${escapeHtml(r.name||r.uid.slice(0,8))}</span> <span class="small">请求加你为好友</span></span><button data-hc="acceptFriend" data-arg="${r.uid}" style="padding:4px 10px;font-size:11px">接受</button></div>`).join('')}</div>`:''}
+  <div class="card"><h3 style="margin-bottom:8px">好友列表（${social.friends.length}）</h3>${social.friends.length?social.friends.map(f=>`<div class="item"><span class="dot" style="background:${f.online?'#4a7c59':'#5a3a3a'}"></span><span class="iname"><span class="hl">${escapeHtml(f.name)}</span><span class="small">Lv.${f.level} · 战力 ${fmt(f.power||0)} · ${f.adv||''}</span></span><button data-hc="openChat" data-arg="${f.uid}" style="padding:4px 10px;font-size:11px">聊天</button></div>`).join(''):'<div class="small">还没有好友，把你的 UID 发给朋友吧。</div>'}</div>
+  ${social.chatFriend?`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3>💬 ${chatFriendData?escapeHtml(chatFriendData.name):'好友'}</h3><button data-act="closeChat" style="padding:4px 10px;font-size:11px">关闭</button></div><div id="chatBox" class="chat-box">${social.chatMessages.length?social.chatMessages.map(m=>`<div class="chat-msg ${m.from===MY_UID?'me':'other'}"><span class="chat-bubble">${escapeHtml(m.text)}</span></div>`).join(''):'<div class="small">还没有消息</div>'}</div><div style="display:flex;gap:6px"><input id="chatInput" placeholder="输入消息…" style="font-size:12px" onkeydown="if(event.key==='Enter'){sendChatMessage(this.value);this.value=''}"><button data-hc="sendChatMsg" style="padding:8px 12px;white-space:nowrap">发送</button></div></div>`:''}
   
   <div class="card">
     <h3 style="margin-bottom:8px">🏆 全服排行榜 Top 50</h3>
@@ -1745,7 +1738,7 @@ function renderBattle(){
   ${B.over?`<div class="card center">${B.reward.exp?`<div class="hl" style="font-size:15px">战斗胜利</div><div class="small">经验 +${fmt(B.reward.exp)}　金币 +${fmt(B.reward.gold)}</div>${B.reward.items.length?`<div class="small">战利品：${B.reward.items.map(i=>`<span class="rar${i.rar}">${i.name}</span>`).join('、')}</div>`:''}${B.reward.shards?`<div class="small hl">圣冠碎片 +1</div>`:''}`:`<div class="danger" style="font-size:15px">战斗结束</div>`}<div class="flex" style="margin-top:12px"><button data-act="endBattle" style="padding:12px">返 回</button></div></div>`:`<div style="margin-bottom:8px">${skills.map((s,i)=>`<button class="skill-btn" data-act="skill" data-arg="${i}" ${!canAct||s.mp>S.mp?'disabled':''}><span>${s.n}</span><small>${s.mp?s.mp+' 斗气':'无消耗'}　${s.d}</small></button>`).join('')}<div style="border-top:1px dashed var(--line);padding-top:8px;margin-top:4px"><div class="small" style="margin-bottom:4px">药水</div><div style="display:flex;gap:4px;flex-wrap:wrap">${Object.entries(POTIONS).map(([k,po])=>{const qty=(S.potions&&S.potions[k])||0;return `<button class="potion-btn" data-act="potion" data-arg="${k}" ${!canAct||qty<=0?'disabled':''}>${po.icon} ${po.n}×${qty}</button>`;}).join('')}</div></div><button class="skill-btn" data-act="flee" ${!canAct?'disabled':''} style="margin-top:8px"><span>🏃 逃跑</span><small>速度越高成功率越高</small></button></div>`}`;
 }
 
-// 事件代理
+// ================= 统一事件监听 =================
 const root=document.getElementById('root');
 root.addEventListener('click', async ev => {
   const btn = ev.target.closest('[data-act],[data-hc]');
@@ -1804,7 +1797,23 @@ root.addEventListener('click', async ev => {
         S.gold-=200;save();render();
         const b=pick(['深渊吞噬者','黄金古龙·格奥罗顿','泣血者']);
         notify('酒馆老板：“听说【'+b+'】在附近出没，去野外碰碰运气吧。”');
-      }
+      },
+      acceptQuest(){ if(UI.activeNpc) acceptQuest(UI.activeNpc); },
+      submitQuest(){ if(UI.activeNpc) submitQuest(UI.activeNpc); },
+      closeNpc(){ closeNpc(); },
+      claimDaily(idx){ claimDailyQuest(parseInt(idx)); },
+      claimMail(id){ claimMail(id); },
+      deleteMail(id){ deleteMail(id); },
+      sendGift(argStr){ const parts=argStr.split('_'); sendGift(parts[0], parseInt(parts[1])); },
+      copyUid(uid){ navigator.clipboard.writeText(uid); notify('已复制 UID'); },
+      sendReq(){ const v = document.getElementById('friendUidInput').value.trim(); sendFriendRequest(v); },
+      createGuild(){ const v = document.getElementById('guildNameInput').value; createGuild(v); },
+      joinGuild(gid){ joinGuild(gid); },
+      leaveGuild(){ leaveGuild(); },
+      openChat(uid){ openChat(uid); },
+      acceptFriend(uid){ acceptFriend(uid); },
+      sendChatMsg(){ const i=document.getElementById('chatInput'); if(i) { sendChatMessage(i.value); i.value=''; } },
+      acceptInvite(){ alert('已接受，请前往野外寻找！'); }
     };
     if(HC[hc]) HC[hc](arg);
     return;
@@ -1818,57 +1827,83 @@ root.addEventListener('click', async ev => {
     case 'back':S=null;UI.inCreate=false;render();break;
     case 'begin':beginGame();break;
     case 'tab':UI.tab=arg;if(arg==='social'&&socialReady())syncMyProfile();render();break;
-    case 'wildStart':startWild();break;
-    case 'explore':explore();break;
-    case 'mode':S.mode=S.mode==='online'?'single':'online';if(S.mode==='single'&&UI.tab==='guild')UI.tab='explore';save();render();notify(S.mode==='online'?'联网模式':'单机模式（经验+20%）');break;
-    case 'equip':equipItem(parseInt(arg));break;
-    case 'sell':sellItem(parseInt(arg));break;
-    case 'gift':UI.showGiftModal=parseInt(arg);render();break;
-    case 'unequip':if(S.equip[arg]){S.inv.push(S.equip[arg]);S.equip[arg]=null;syncVitals();save();render();if(socialReady())syncMyProfile();}break;
-    case 'adv':S.adv=arg;S.hp=playerStats().hp;S.mp=playerStats().mp;save();render();if(socialReady())syncMyProfile();notify('进阶：'+arg);break;
-    case 'sub':S.sub=arg;save();render();if(socialReady())syncMyProfile();notify('副职业：'+CLASSES[arg].name);break;
-    case 'dungeon':enterDungeon(parseInt(arg));break;
-    case 'skill':await useSkill(parseInt(arg));break;
-    case 'potion':usePotion(arg);break;
-    case 'flee':flee();break;
-    case 'endBattle':B=null;render();break;
-    case 'crownAwaken':{if((S.shards||0)<5||S.crown)return;S.shards-=5;const c=pick(CROWNS);S.crown={name:c.name,days:30};S.hp=playerStats().hp;S.mp=playerStats().mp;save();render();if(socialReady())syncMyProfile();notify('👑 觉醒：'+c.name);break;}
-    case 'shopTab':UI.shopTab=arg;if(arg==='weapon')ensureWeaponStock();render();break;
-    case 'guildTab':UI.guildTab=arg;render();break;
-    case 'donateGuild':donateGuild(parseInt(arg));break;
-    case 'buyPotion':{const po=POTIONS[arg];if(!po||S.gold<po.price)return;S.gold-=po.price;if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0,fire:0};S.potions[arg]=(S.potions[arg]||0)+1;save();render();notify('购买 '+po.n);break;}
-    case 'buyBook':{const bk=(SKILLBOOKS[S.cls]||[]).find(b=>b.id===arg);if(!bk||S.skillbooks.includes(arg)||S.gold<bk.price)return;S.gold-=bk.price;S.skillbooks.push(arg);save();render();notify('学会技能书：'+bk.n);break;}
-    case 'buyGacha':{
-      const gType = arg;
-      const gItem = GACHA_ITEMS[gType];
+    case 'nav':
+      if (arg.startsWith('region_')) {
+        UI.curRegion = parseInt(arg.split('_')[1]);
+        UI.mapLevel = 'city';
+        render();
+      } else if (arg.startsWith('city_')) {
+        UI.curCity = parseInt(arg.split('_')[1]);
+        UI.mapLevel = 'building';
+        render();
+      } else if (arg.startsWith('bld_')) {
+        enterBuilding(arg.split('_')[1]);
+      } else if (arg.startsWith('npc_')) {
+        openNpc(arg.split('_')[1]);
+      } else if (arg === 'back_world') {
+        UI.mapLevel = 'world';
+        render();
+      } else if (arg === 'back_city') {
+        UI.mapLevel = 'city';
+        render();
+      } else if (arg === 'back_building') {
+        exitBuilding();
+      }
+      break;
+    case 'exitWild': exitWild(); break;
+    case 'wildMove': wildMove(arg); break;
+    case 'wildStart': startWild(); break;
+    case 'explore': explore(); break;
+    case 'mode': S.mode=S.mode==='online'?'single':'online'; if(S.mode==='single'&&UI.tab==='guild')UI.tab='explore'; save(); render(); notify(S.mode==='online'?'联网模式':'单机模式（经验+20%）'); break;
+    case 'equip': equipItem(parseInt(arg)); break;
+    case 'sell': sellItem(parseInt(arg)); break;
+    case 'gift': UI.showGiftModal=parseInt(arg); render(); break;
+    case 'unequip': if(S.equip[arg]){S.inv.push(S.equip[arg]);S.equip[arg]=null;syncVitals();save();render();if(socialReady())syncMyProfile();} break;
+    case 'adv': S.adv=arg;S.hp=playerStats().hp;S.mp=playerStats().mp;save();render();if(socialReady())syncMyProfile();notify('进阶：'+arg); break;
+    case 'sub': S.sub=arg;save();render();if(socialReady())syncMyProfile();notify('副职业：'+CLASSES[arg].name); break;
+    case 'dungeon': enterDungeon(parseInt(arg)); break;
+    case 'skill': await useSkill(parseInt(arg)); break;
+    case 'potion': usePotion(arg); break;
+    case 'flee': flee(); break;
+    case 'endBattle': B=null;render(); break;
+    case 'crownAwaken': {if((S.shards||0)<5||S.crown)return;S.shards-=5;const c=pick(CROWNS);S.crown={name:c.name,days:30};S.hp=playerStats().hp;S.mp=playerStats().mp;save();render();if(socialReady())syncMyProfile();notify('👑 觉醒：'+c.name);break;}
+    case 'shopTab': UI.shopTab=arg;if(arg==='weapon')ensureWeaponStock();render(); break;
+    case 'guildTab': UI.guildTab=arg;render(); break;
+    case 'donateGuild': donateGuild(parseInt(arg)); break;
+    case 'buyPotion': {const po=POTIONS[arg];if(!po||S.gold<po.price)return;S.gold-=po.price;if(!S.potions)S.potions={hp:0,hpBig:0,mp:0,ultimate:0,fire:0};S.potions[arg]=(S.potions[arg]||0)+1;save();render();notify('购买 '+po.n);break;}
+    case 'buyBook': {const bk=(SKILLBOOKS[S.cls]||[]).find(b=>b.id===arg);if(!bk||S.skillbooks.includes(arg)||S.gold<bk.price)return;S.gold-=bk.price;S.skillbooks.push(arg);save();render();notify('学会技能书：'+bk.n);break;}
+    case 'buyGacha': {
+      const gType = arg, gItem = GACHA_ITEMS[gType];
       if(!gItem || S.gold < gItem.price) { notify('金币不足'); return; }
       if(gType !== 'mat' && S.inv.length >= 40) { notify('背包已满'); return; }
-      
       S.gold -= gItem.price;
-      
       if(gType === 'normal') {
-        const rar=rnd(4,7);
-        const it=genEquip(pick(SLOTS).id,Math.max(S.level,10),rar);
+        const rar=rnd(4,7), it=genEquip(pick(SLOTS).id,Math.max(S.level,10),rar);
         S.inv.push(it); notify('🎁 开出：'+it.name);
       } else if (gType === 'premium') {
-        const rar=rnd(6,8);
-        const it=genEquip(pick(SLOTS).id,Math.max(S.level,20),rar);
+        const rar=rnd(6,8), it=genEquip(pick(SLOTS).id,Math.max(S.level,20),rar);
         S.inv.push(it); notify('💎 极品！开出：'+it.name);
       } else if (gType === 'mat') {
-        const ms = ['herb','dew','flare','crystal'];
-        const m = pick(ms);
+        const ms = ['herb','dew','flare','crystal'], m = pick(ms);
         S.mats[m] = (S.mats[m]||0) + 5;
         notify('📦 开出：'+MATS[m][0]+' ×5');
       }
-      save(); render();
-      break;
+      save(); render(); break;
     }
-    case 'refreshWeaponShop':{if(S.gold<WEAPON_REFRESH_COST){notify('金币不足');return;}S.gold-=WEAPON_REFRESH_COST;refreshWeaponStock();save();render();notify('武器已刷新');break;}
-    case 'buyWeapon':{const idx=parseInt(arg);if(!S.weaponStock)return;const it=S.weaponStock[idx];if(!it)return;if(S.gold<it.shopPrice){notify('金币不足');return;}if(S.inv.length>=40){notify('背包已满');return;}S.gold-=it.shopPrice;const copy=JSON.parse(JSON.stringify(it));delete copy.shopPrice;S.inv.push(copy);S.weaponStock.splice(idx,1);save();render();notify('购买 '+copy.name);break;}
-    case 'showAuth':UI.showAuthModal=true;UI.authMode='login';render();break;
-    case 'showMail':UI.showMailModal=true;render();break;
-    case 'logout':logout();break;
-    case 'reset':if(confirm('删除本地存档重新开始？（如果是正式账号，云存档依然存在）')){try{localStorage.removeItem('holycrown_save');}catch(e){}S=null;B=null;UI.creating=true;UI.classSel=null;render();}break;
+    case 'refreshWeaponShop': {if(S.gold<WEAPON_REFRESH_COST){notify('金币不足');return;}S.gold-=WEAPON_REFRESH_COST;refreshWeaponStock();save();render();notify('武器已刷新');break;}
+    case 'buyWeapon': {const idx=parseInt(arg);if(!S.weaponStock)return;const it=S.weaponStock[idx];if(!it)return;if(S.gold<it.shopPrice){notify('金币不足');return;}if(S.inv.length>=40){notify('背包已满');return;}S.gold-=it.shopPrice;const copy=JSON.parse(JSON.stringify(it));delete copy.shopPrice;S.inv.push(copy);S.weaponStock.splice(idx,1);save();render();notify('购买 '+copy.name);break;}
+    case 'openInvite': UI.inviteBoss=parseInt(arg); render(); break;
+    case 'showAuth': UI.showAuthModal=true; UI.authMode='login'; render(); break;
+    case 'switchAuth': UI.authMode = UI.authMode==='login'?'register':'login'; render(); break;
+    case 'closeAuth': UI.showAuthModal=false; render(); break;
+    case 'doAuth': doAuth(); break;
+    case 'showMail': UI.showMailModal=true; render(); break;
+    case 'closeMail': UI.showMailModal=false; render(); break;
+    case 'closeGift': UI.showGiftModal=null; render(); break;
+    case 'closeChat': social.chatFriend=null; social.chatMessages=[]; if(social.chatUnsub){social.chatUnsub();social.chatUnsub=null;} render(); break;
+    case 'syncProfile': if(socialReady()){syncMyProfile();notify('已刷新资料至排行榜');} break;
+    case 'logout': logout(); break;
+    case 'reset': if(confirm('删除本地存档重新开始？（如果是正式账号，云存档依然存在）')){try{localStorage.removeItem('holycrown_save');}catch(e){}S=null;B=null;UI.creating=true;UI.classSel=null;render();} break;
   }
 });
 
