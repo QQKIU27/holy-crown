@@ -811,7 +811,8 @@ function playerStats(){
   if(S.crown){const cr=CROWNS.find(x=>x.name===S.crown.name);if(cr)for(const s in cr.b)st[s]=(st[s]||0)*(1+cr.b[s]/100);}
   for(const t of S.titles){const td=TITLES.find(x=>x.name===t);if(td&&td.b)for(const s in td.b)st[s]=(st[s]||0)+td.b[s];}
   if(social.myGuildData){const lvl = Math.min(10,Number(social.myGuildData.level)||1);st.hp *= (1 + lvl * 0.03);st.atk *= (1 + lvl * 0.03);st.def *= (1 + lvl * 0.03);st.spd *= (1 + lvl * 0.03);}
-  if(S.beast && hasCls('summoner')) { const l=S.beast.lv; st.hp+=l*12; st.atk+=l*2; st.def+=Math.round(l*1.5); }
+  if(S.beast && hasCls('summoner')) { const l=S.beast.lv; st.hp+=l*12; st.atk+=l*2; st.def+=Math.round(l*1.5); if(S.level>=10){st.hp=Math.round(st.hp*1.1);st.atk=Math.round(st.atk*1.1);st.def=Math.round(st.def*1.1);} }
+  if(S.hcx&&S.hcx.mount){const m=S.hcx.mount,ml=Math.max(1,Number(m.lv)||1);st.hp+=ml*15;st.atk+=Math.round(ml*1.5);st.def+=ml;st.spd+=Math.floor(ml/3);}
   for(const s in st)st[s]=Math.round(st[s]);
   return st;
 }
@@ -940,16 +941,41 @@ async function useSkill(idx){
   if(!B||B.over||B.busy)return;
   B.busy=true;const p=playerStats();const skills=getSkills();const sk=skills[idx];
   if(!sk){B.busy=false;return;}
+  B.cd=B.cd||{};
+  if((B.cd[sk.n]||0)>0){notify('「'+sk.n+'」冷却中：'+B.cd[sk.n]+' 回合');B.busy=false;return;}
   if(sk.mp>S.mp){notify('斗气不足！');B.busy=false;return;}
+  const hcCd=sk.mp>=30?4:sk.mp>=15?3:sk.mp>=8?2:0; // 包含本回合结算，实际冷却分别为 3/2/1 个后续回合
+  if(hcCd)B.cd[sk.n]=hcCd;
   S.mp-=sk.mp;const e=B.enemy;
   if(sk.t==='buff'){applyBuff(sk);B.log.push({t:'sys',m:'你使用了「'+sk.n+'」，状态提升！'});render();await sleep(420);}
-  else if(sk.t==='heal'){const heal=Math.round(p.atk*sk.mul+rf(0.9,1.1)*p.hp*0.05);S.hp=Math.min(p.hp,S.hp+heal);B.log.push({t:'heal',m:'✨ '+sk.n+' 恢复了 '+fmt(heal)+' 点生命'});render();await sleep(420);}
+  else if(sk.t==='heal'){let heal=Math.round(p.atk*sk.mul+rf(0.9,1.1)*p.hp*0.05);if(S.cls==='priest'&&S.level>=10)heal=Math.round(heal*1.25);S.hp=Math.min(p.hp,S.hp+heal);B.log.push({t:'heal',m:'✨ '+sk.n+' 恢复了 '+fmt(heal)+' 点生命'});if(HCX_SFX)HCX_SFX.heal();render();await sleep(420);}
   else if(sk.t==='mana'){const mana=Math.round(p.mp*sk.mul);S.mp=Math.min(p.mp,S.mp+mana);B.log.push({t:'heal',m:'💠 '+sk.n+' 恢复了 '+fmt(mana)+' 点斗气'});render();await sleep(420);}
   else {
-    const hits=sk.hits||1;let total=0,anyCrit=false;const critRate=p.crit+(B.critBuff?100:0);
-    for(let i=0;i<hits;i++){const r=calcDmg(p.atk*(1+(B.atkBuff||0)),e.def*(1-B.eDefDown),sk.mul,critRate);total+=r.dmg;anyCrit=anyCrit||r.crit;await sleep(120);}
-    e.hp-=total;if(sk.n.includes('腐蚀'))B.eDefDown=Math.min(0.5,B.eDefDown+0.25);
+    const hits=sk.hits||1;let total=0,anyCrit=false;const hcEle=hcxSkillElement(sk),hcAdv=hcxElementAdv(hcEle,e.weakEle);
+    let critRate=p.crit+(B.critBuff?100:0);if(S.cls==='assassin'&&S.level>=10&&B.firstStrike)critRate=100;
+    let targetDef=e.def*(1-B.eDefDown);if(S.level>=30&&S.cls==='spear')targetDef*=.85;if(S.level>=30&&S.cls==='archer')targetDef*=.8;
+    let classMult=1;
+    if(S.cls==='sword'&&S.level>=10&&(B.turn+1)%4===0)classMult*=1.3;
+    if(S.cls==='mage'&&S.level>=60)classMult*=1.2;
+    if(S.cls==='mage'&&S.level>=10&&B.combo&&B.combo.element===hcEle)classMult*=1.15;
+    if(S.cls==='summoner'&&S.level>=60&&/召唤|龙|灵|兽/.test(sk.n))classMult*=1.2;
+    if(S.cls==='spear'&&S.level>=60&&e.isBoss)classMult*=1.15;
+    if(S.cls==='alchemist'&&S.level>=60)classMult*=1.18;
+    if(S.cls==='alchemist'&&S.level>=10&&hcEle==='fire')classMult*=1.15;
+    if(S.cls==='blade'&&S.level>=10&&B.firstStrike)classMult*=1.4;
+    if(S.cls==='blade'&&S.level>=60)classMult*=1+Math.min(.2,Math.max(0,(B.combo.count||0)*.04));
+    if(S.cls==='archer'&&S.level>=60&&B.firstStrike)classMult*=1.2;
+    if(S.cls==='fighter'&&S.level>=10&&hits>1)classMult*=1.2;
+    const shieldBefore=B.enemyShield||0;
+    for(let i=0;i<hits;i++){const r=calcDmg(p.atk*(1+(B.atkBuff||0)),targetDef,sk.mul*classMult,critRate);let hitDmg=r.dmg;if(r.crit&&S.cls==='blade'&&S.level>=30)hitDmg=Math.round(hitDmg*1.2);if(r.crit&&S.cls==='assassin'&&S.level>=60)hitDmg=Math.round(hitDmg*1.3);total+=Math.round(hitDmg*hcAdv);anyCrit=anyCrit||r.crit;await sleep(120);}
+    B.combo=B.combo||{element:null,count:0};B.combo={element:hcEle,count:B.combo.element===hcEle?(B.combo.count||0)+1:1};B.firstStrike=false;
+    if(hcAdv>1)B.log.push({t:'crit',m:'✨ 元素克制！'+HCX_ELEMENTS[hcEle].n+' 命中弱点，伤害提升 50%'});
+    else if(hcAdv<1)B.log.push({t:'sys',m:'⚠️ 元素受制，伤害降低 30%'});
+    hcxDamageEnemy(total);if(shieldBefore>0&&B.enemyShield===0&&S.cls==='fighter'&&S.level>=30){const heal=Math.round(p.hp*.08);S.hp=Math.min(p.hp,S.hp+heal);B.log.push({t:'heal',m:'👊 击破护盾，气合回复 '+fmt(heal)+' 生命'});}if(S.cls==='sword'&&S.level>=30&&anyCrit){const heal=Math.max(1,Math.round(p.hp*.03));S.hp=Math.min(p.hp,S.hp+heal);B.log.push({t:'heal',m:'⚔️ 剑心回复 '+fmt(heal)+' 生命'});}if(sk.n.includes('腐蚀'))B.eDefDown=Math.min(0.5,B.eDefDown+0.25);
     B.log.push({t:anyCrit?'crit':'dmg',m:(anyCrit?'💥 暴击！':'')+sk.n+' 对 '+e.name+' 造成 '+fmt(total)+' 点伤害'+(hits>1?'（'+hits+'段）':'')});
+    hcxApplyAttackTraits(total,anyCrit);
+    if(anyCrit)HCX_SFX.crit();else HCX_SFX.hit();
+    hcxFloat((anyCrit?'暴击 ':'')+'-'+fmt(total),anyCrit?'#ffd700':'#e88a7a','34%',anyCrit?26:20);
     render();await sleep(420);
   }
   if(e.hp<=0){await winBattle();return;}
@@ -981,6 +1007,7 @@ async function enemyTurn(){
     if (B.turn > 0 && B.turn % 4 === 0) useEnemySkill = true;
   }
 
+  if(e.isBoss&&!useBossSkill&&B.phaseSkillRate>0&&Math.random()<B.phaseSkillRate)useBossSkill=true;
   if(useBossSkill || useEnemySkill){
     const sk = e.isBoss ? pick(BOSS_SKILLS) : pick(ENEMY_SKILLS);
     const eOpts= e.isBoss?{defFactor:0.05,spread:0.20,minMul:0.35}:{defFactor:0.1,spread:0.15,minMul:0.25};
@@ -1011,7 +1038,7 @@ function usePotion(type){
   const qty=(S.potions&&S.potions[type])||0;if(qty<=0){notify('药水不足');return;}
   const p=playerStats(),b=po.base,eff=potEff(type),tag=eff<0.5?'（药力不足，仅发挥'+Math.round(eff*100)+'%）':'';
   S.potions[type]--;
-  if(b==='fire'){const e=B.enemy,d=Math.round(p.atk*3.2*(hasCls('alchemist')?1.5:1)*rf(.9,1.1)*Math.max(eff,.15));e.hp-=d;B.log.push({t:'dmg',m:'🔥 '+po.n+'炸开，造成 '+fmt(d)+' 点伤害'+tag});save();if(e.hp<=0){winBattle();return;}render();return;}
+  if(b==='fire'){const e=B.enemy,d=Math.round(p.atk*3.2*(hasCls('alchemist')?1.5:1)*rf(.9,1.1)*Math.max(eff,.15));hcxDamageEnemy(d);B.log.push({t:'dmg',m:'🔥 '+po.n+'炸开，造成 '+fmt(d)+' 点伤害'+tag});save();if(e.hp<=0){winBattle();return;}render();return;}
   const pc={hp:[.3,0],hpBig:[.6,0],mp:[0,.5],ultimate:[.4,.4]}[b];
   const hh=Math.round(p.hp*pc[0]*eff),hm=Math.round(p.mp*pc[1]*eff);
   S.hp=Math.min(p.hp,S.hp+hh);S.mp=Math.min(p.mp,S.mp+hm);
@@ -1026,7 +1053,7 @@ async function winBattle(){
   B.log.push({t:'win',m:'✦ 击败 '+e.name+'！获得 '+fmt(exp)+' 经验、'+fmt(gold)+' CC'});
   if(e.isBoss&&e.worldMarkerId){const mi=(S.markedBosses||[]).findIndex(x=>x.id===e.worldMarkerId);if(mi>=0){S.markedBosses.splice(mi,1);B.log.push({t:'sys',m:'📍 世界BOSS已击败，地图定位已自动清除'});}}
   const dropCount=e.isBoss?rnd(2,3):(Math.random()<0.45?1:0);
-  for(let i=0;i<dropCount;i++){if(S.inv.length>=40){B.log.push({t:'sys',m:'背包已满'});break;}const it=genEquip(pick(SLOTS).id,e.lv,Math.min(8,Math.max(0,Math.floor(e.lv/18)+rnd(0,2))));S.inv.push(it);B.reward.items.push(it);B.log.push({t:'win',m:'📦 获得装备：'+it.name});}
+  for(let i=0;i<dropCount;i++){if(S.inv.length>=(S.invCap||40)){B.log.push({t:'sys',m:'背包已满'});break;}const it=genEquip(pick(SLOTS).id,e.lv,Math.min(8,Math.max(0,Math.floor(e.lv/18)+rnd(0,2))));S.inv.push(it);B.reward.items.push(it);B.log.push({t:'win',m:'📦 获得装备：'+it.name});}
   if(e.isBoss&&Math.random()<0.5){S.shards=(S.shards||0)+1;B.reward.shards=1;B.log.push({t:'win',m:'✧ 获得「圣冠碎片」×1'});}
   S.kills++;checkTitles();levelUpCheck();
   progressSkillTask(e);
@@ -1101,7 +1128,7 @@ const REGION_EXTRA=[[],['炼金失控体'],['草元素兽'],['冰霜古狼','血
 function spawnName(){const x=REGION_EXTRA[UI.curRegion]||[];return pick(['变异野狼','流窜盗贼','矿坑蜘蛛','落单佣兵','沼泽巨蜥'].concat(x,x));}
 function explore(){
   if(Math.random()<0.65) startBattle(makeEnemy(spawnName(), Math.max(1,S.level+rnd(-2,2)), false));
-  else { const g=Math.round((20+S.level*15)*rf(.8,1.5)); S.gold+=g; save(); render(); notify('发现宝箱 +'+fmt(g)+' CC'); }
+  else { const eventBonus=typeof hcxActiveEvent==='function'&&hcxActiveEvent().effect==='gold'?1.2:1;const g=Math.round((20+S.level*15)*rf(.8,1.5)*eventBonus); S.gold+=g; save(); render(); notify('发现宝箱 +'+fmt(g)+' CC'); }
 }
 
 function enterDungeon(i){
@@ -1128,8 +1155,9 @@ function wildMove(dir){
   UI.wildLog.push({t:'sys',m:`你向${dir==='forward'?'前':dir==='left'?'左':'右'}走去，来到了坐标 (${UI.wildPos.x}, ${UI.wildPos.y})。`});
   if(UI.wildLog.length > 10) UI.wildLog.shift();
 
+  const worldEvent=typeof hcxActiveEvent==='function'?hcxActiveEvent():null;
   const r = Math.random();
-  if(r < 0.15) {
+  if(r < (worldEvent&&worldEvent.effect==='drop'?0.22:0.15)) {
     const bossName = '深渊吞噬者';
     const boss = makeEnemy(bossName, S.level + 10, true);
     const markerId='wb_'+Date.now()+'_'+rnd(100,999);
@@ -1527,7 +1555,7 @@ function sendGift(friendUid, invIdx) {
 async function claimMail(mailId) {
   const mail=social.mails.find(m=>m.id===mailId);
   if(!mail||mail.status==='claimed')return;
-  if(mail.item){if(S.inv.length>=40){notify('背包已满');return;}if(!sanitizeItem(mail.item)){notify('装备附件已损坏');return;}}
+  if(mail.item){if(S.inv.length>=(S.invCap||40)){notify('背包已满');return;}if(!sanitizeItem(mail.item)){notify('装备附件已损坏');return;}}
   if(mail.gift){const g=mail.gift;if(!((g.kind==='material'&&MATS[g.key])||(g.kind==='potion'&&POTIONS[g.key]))){notify('附件类型无效');return;}}
   try{
     const tx=await FB.runTransaction(FB.ref(FB.db,'mails/'+MY_UID+'/'+mailId),current=>{
@@ -1577,7 +1605,7 @@ function searchTreasure(){
     if(roll<0.38){
       const gold=Math.round(rnd(18,65)*(1+S.level*0.36));S.gold+=gold;message='💰 找到遗落的钱袋：+'+fmt(gold)+' CC';
     }else if(roll<0.75){
-      if(S.inv.length>=40){const gold=Math.round(rnd(25,75)*(1+S.level*.28));S.gold+=gold;message='🎒 背包已满，宝物被折算为 '+fmt(gold)+' CC';}
+      if(S.inv.length>=(S.invCap||40)){const gold=Math.round(rnd(25,75)*(1+S.level*.28));S.gold+=gold;message='🎒 背包已满，宝物被折算为 '+fmt(gold)+' CC';}
       else{
         const r=Math.random();let rar=r<.42?rnd(0,2):r<.72?rnd(3,4):r<.92?rnd(5,6):r<.99?7:8;
         const it=genEquip(pick(SLOTS).id,clamp(S.level+rnd(-4,8),1,160),rar);S.inv.push(it);message='✨ 出货！发现装备：'+it.name+'（'+RAR[rar].n+'）';
@@ -2717,7 +2745,7 @@ root.addEventListener('click', async ev => {
       const gType = arg, gItem = GACHA_ITEMS[gType];
       const cost=gachaPrice(gType);
       if(!gItem || S.gold < cost) { notify('金币不足，需要 '+fmt(cost)+' CC'); return; }
-      if(gType !== 'mat' && S.inv.length >= 40) { notify('背包已满'); return; }
+      if(gType !== 'mat' && S.inv.length >= (S.invCap||40)) { notify('背包已满'); return; }
       S.gold -= cost;
       if(gType === 'normal') {
         const rar=rnd(4,7), it=genEquip(pick(SLOTS).id,Math.max(S.level,10),rar);
@@ -2733,7 +2761,7 @@ root.addEventListener('click', async ev => {
       save(); render(); break;
     }
     case 'refreshWeaponShop': {if(S.gold<WEAPON_REFRESH_COST){notify('金币不足');return;}S.gold-=WEAPON_REFRESH_COST;refreshWeaponStock();save();render();notify('武器已刷新');break;}
-    case 'buyWeapon': {const idx=parseInt(arg);if(!S.weaponStock)return;const it=S.weaponStock[idx];if(!it)return;if(S.gold<it.shopPrice){notify('金币不足');return;}if(S.inv.length>=40){notify('背包已满');return;}S.gold-=it.shopPrice;const copy=JSON.parse(JSON.stringify(it));delete copy.shopPrice;S.inv.push(copy);S.weaponStock.splice(idx,1);save();render();notify('购买 '+copy.name);break;}
+    case 'buyWeapon': {const idx=parseInt(arg);if(!S.weaponStock)return;const it=S.weaponStock[idx];if(!it)return;if(S.gold<it.shopPrice){notify('金币不足');return;}if(S.inv.length>=(S.invCap||40)){notify('背包已满');return;}S.gold-=it.shopPrice;const copy=JSON.parse(JSON.stringify(it));delete copy.shopPrice;S.inv.push(copy);S.weaponStock.splice(idx,1);save();render();notify('购买 '+copy.name);break;}
     case 'openInvite': UI.inviteBoss=parseInt(arg); render(); break;
     case 'removeBossMarker': removeBossMarker(arg); break;
     case 'removeFriend': removeFriend(arg); break;
@@ -2764,7 +2792,7 @@ function beginGame(){
   S={name:UI.name.slice(0,12),origin:UI.originSel,cls:UI.classSel,level:1,exp:0,hp:0,mp:0,gold:500,shards:0,inv:[],equip:{weapon:null,helmet:null,armor:null,boots:null,bracer:null,bracelet:null,ring:null,necklace:null},adv:null,sub:null,crown:null,titles:[],guildId:null,mode:'online',day:1,kills:0,deaths:0,skillbooks:[],potions:{hp:2,hpBig:0,mp:1,ultimate:0,fire:0},weaponStock:[],markedBosses:[],quests:{},learned:[],recipes:{},mats:{},training:null,treasureSearch:{windowStart:0,used:0},activeDuel:null,beast:null,lastDailyReset:0,dailyQuests:[],npcFavor:{}};
   const p=playerStats();S.hp=p.hp;S.mp=p.mp;
   const starter=genEquip('weapon',1,1);starter.name='新手·'+starter.name;S.equip.weapon=starter;
-  B=null;UI.tab='explore';UI.mapLevel='world';UI.inCreate=false;save();render();notify('欢迎来到阿斯米德约顿');
+  B=null;UI.tab='explore';UI.mapLevel='world';UI.inCreate=false;hcxInitSave();save();render();notify('欢迎来到阿斯米德约顿');
   if(socialReady()){syncMyProfile();listenMyGuild();}
 }
 
@@ -2796,6 +2824,951 @@ function render(){
 }
 
 ['createGuild','joinGuild','leaveGuild','donateGuild','sendGift','enhanceItem'].forEach(n=>{const f=window[n];let busy=false;window[n]=async function(...a){if(busy)return;busy=true;try{return await f.apply(this,a);}finally{busy=false;}};});
+
+/* ============================================================
+   HOLY CROWN 2.5 · 补代整合扩展包
+   所有新增数据进入原 S 存档；不替换原有账号/云端身份逻辑。
+   ============================================================ */
+const HCX_VERSION = 26;
+const HCX_ELEMENTS = {
+  fire:{n:'火',ic:'🔥'}, wind:{n:'风',ic:'🌪️'}, grass:{n:'草',ic:'🌿'},
+  water:{n:'水',ic:'💧'}, rock:{n:'岩',ic:'🪨'}, ice:{n:'冰',ic:'❄️'},
+  thunder:{n:'雷',ic:'⚡'}
+};
+const HCX_COUNTER = {
+  fire:['grass','ice'], wind:['rock'], grass:['water'],
+  water:['fire','rock'], rock:['thunder'], ice:['water','wind'],
+  thunder:['water','ice']
+};
+function hcxElementAdv(a,b){
+  if(!a||!b) return 1;
+  if((HCX_COUNTER[a]||[]).includes(b)) return 1.5;
+  if((HCX_COUNTER[b]||[]).includes(a)) return 0.7;
+  return 1;
+}
+function hcxClassElement(cls){
+  return {sword:'fire',spear:'thunder',mage:'fire',priest:'water',summoner:'grass',
+    archer:'wind',alchemist:'fire',blade:'wind',fighter:'rock',assassin:'ice',guardian:'rock'}[cls]||'fire';
+}
+function hcxSkillElement(sk){
+  const n=String(sk&&sk.n||'');
+  if(/火|炎|焰|焚|爆/.test(n)) return 'fire';
+  if(/冰|霜|寒|冻/.test(n)) return 'ice';
+  if(/雷|霆|闪/.test(n)) return 'thunder';
+  if(/风|燕|疾|羽/.test(n)) return 'wind';
+  if(/草|荆棘|藤|木|毒/.test(n)) return 'grass';
+  if(/水|潮|浪|泪/.test(n)) return 'water';
+  if(/岩|石|盾|壁/.test(n)) return 'rock';
+  return hcxClassElement(S && S.cls);
+}
+const HCX_WEAPON_BASE = {
+  sword:['长剑','阔剑','双手剑','骑士剑','军刀','破甲剑','符文剑','裁决剑'],
+  spear:['长枪','骑枪','战矛','三叉戟','薙刀','长戟','龙枪','圣枪'],
+  mage:['法杖','星杖','水晶杖','元素杖','秘仪杖','观星杖','黄庭杖'],
+  priest:['圣徽','圣铃','念珠','经卷','圣杖','祝祷书','白银法典'],
+  summoner:['魂灯','兽牙链','召唤铃','灵骨杖','契约卷轴','龙骨哨'],
+  archer:['短弓','长弓','复合弓','重弩','风弓','穿云弓','月弦弓'],
+  alchemist:['炼金枪','蒸汽炮','机械臂','酸液喷射器','千机匣','铳枪'],
+  blade:['太刀','打刀','野太刀','长刀','斩马刀','居合刀','无念刀','残心刀'],
+  fighter:['拳套','指虎','铁拳','臂铠','虎爪','拳刃','百裂拳套'],
+  assassin:['匕首','短刀','影刃','毒匕','袖剑','隐锋','紫百合刃'],
+  guardian:['塔盾','鸢盾','圆盾','壁垒盾','不灭盾','铁冠盾'],
+  common:['长剑','战斧','战锤','匕首','长矛','镰刀','铁鞭']
+};
+const HCX_LEGENDS = {
+  sword:['天御切','千日神·虚影','白垩·断罪','南冠之锋','剑圣·剑心'],
+  spear:['弑神之枪·赫玛格丽','天穿枪·阿斯卡隆','安雅丽丝','安那瓦尔','狼纹格尔'],
+  mage:['黄庭星轨','原初之冰','星骸权杖','卡加欧秘典','星辰坠落'],
+  priest:['圣骸·裹布','第七先知之焰','白银宪章','奥勒良圣遗'],
+  summoner:['龙神·塞拉芬','时空之龙·尼德霍格','日月二子','深渊子宫'],
+  archer:['苍穹之主·天穿之矢','风鸣高地的回响','黄金羽翼','千羽落'],
+  alchemist:['黑巴隆炮击','熔炉之心','千机伞','终焉药剂'],
+  blade:['弑神之刃','残心无念','青棘','我流·无念一心','燕返·终'],
+  fighter:['百胜·神拳','魔神降世','赫拉克勒斯之拳','百裂·终'],
+  assassin:['紫百合之毒','暗影君主之牙','十三钗','影杀·绝'],
+  guardian:['不灭壁垒','铁冠圣所','永冻王座','圣盾·守护'],
+  common:['千机伞','血泪','原初之冰','铁冠·南冠']
+};
+const HCX_PRE = [
+ ['锈蚀','破损','粗制','残缺'],['青铜','素朴','学徒','戍卫'],['白银','银辉','月白','霜纹'],
+ ['黄金','金辉','日轮','鎏金'],['史诗','古歌','铭文','碑刻'],['遗迹','断垣','白垩','朽冠'],
+ ['传说','圣痕','血泪','铁冠'],['神话','神谕','星轨','永冻'],['三日月','弑神','神诞','黄庭']
+];
+const HCX_SUF = [
+ ['·残刃','·碎','·旧物'],['·之刃','·印记','·戍卫'],['·月影','·低语','·轻鸣'],
+ ['·裁决','·荣光','·日轮'],['·序曲','·挽歌','·碑文'],['·残响','·叹息','·断垣'],
+ ['·终焉','·圣痕','·荆棘'],['·神谕','·冠冕','·星轨'],['·三日月','·神诞之日','·原初之冰']
+];
+const HCX_PASSIVES = [
+ {id:'p_atk',n:'锋锐',k:'atk',v:.04,step:.012},{id:'p_def',n:'坚壁',k:'def',v:.05,step:.015},
+ {id:'p_hp',n:'生机',k:'hp',v:.06,step:.02},{id:'p_mp',n:'灵泉',k:'mp',v:.05,step:.015},
+ {id:'p_spd',n:'疾行',k:'spd',v:.04,step:.012},{id:'p_crit',n:'锐眼',k:'crit',v:1.5,step:.7},
+ {id:'p_life',n:'吸魂',k:'lifesteal',v:.03,step:.012},{id:'p_thorn',n:'反震',k:'thorns',v:.04,step:.015}
+];
+const HCX_TRIGGERS = [
+ {id:'t_extra',n:'破魔',type:'extra',chance:8,step:1.1,power:.25,pstep:.04},
+ {id:'t_drain',n:'嗜血',type:'drain',chance:9,step:1.1,power:.15,pstep:.03},
+ {id:'t_bleed',n:'割裂',type:'bleed',chance:8,step:1.1,turns:2},
+ {id:'t_burn',n:'燃心',type:'burn',chance:8,step:1.1,turns:2},
+ {id:'t_freeze',n:'凝霜',type:'freeze',chance:4,step:.8,turns:1},
+ {id:'t_stun',n:'震慑',type:'stun',chance:4,step:.8,turns:1},
+ {id:'t_counter',n:'回击',type:'counter',chance:8,step:1.1,power:.5,pstep:.03},
+ {id:'t_regen',n:'再生',type:'regen',chance:20,step:.5,power:.03,pstep:.005},
+ {id:'t_crit',n:'绝杀',type:'critbonus',power:.2,pstep:.03},
+ {id:'t_killmp',n:'屠戮',type:'killmp',power:.05,pstep:.01}
+];
+const HCX_UNIQUES = [
+ {id:'u_blood',n:'血之狂宴',type:'drain',chance:10,step:1,power:.25,pstep:.03},
+ {id:'u_exec',n:'处刑宣告',type:'extra',chance:8,step:1,power:.6,pstep:.05},
+ {id:'u_frost',n:'霜心',type:'freeze',chance:6,step:.9,turns:1},
+ {id:'u_flame',n:'焚魂',type:'burn',chance:10,step:1,turns:2},
+ {id:'u_quake',n:'裂地',type:'stun',chance:6,step:.9,turns:1},
+ {id:'u_guard',n:'磐石之心',passive:{hp:.12,def:.08}},
+ {id:'u_shadow',n:'疾影',passive:{spd:.10,crit:4}},
+ {id:'u_precision',n:'精准',passive:{crit:8}},
+ {id:'u_vampire',n:'暗裔血脉',passive:{lifesteal:.08}},
+ {id:'u_thorns',n:'荆棘之甲',passive:{thorns:.12}},
+ {id:'u_arcane',n:'奥术洪流',passive:{mp:.12,atk:.06}},
+ {id:'u_wind',n:'风之疾',passive:{spd:.12}}
+];
+const HCX_SETS = {
+ dragon:{name:'巨龙之誓',icon:'🐲',pieces:['weapon','armor','helmet','boots'],bonuses:[
+  {need:2,desc:'攻击 +8%，生命 +8%',passive:{atk:.08,hp:.08}},
+  {need:3,desc:'暴击率 +10%',passive:{crit:10}},
+  {need:4,desc:'攻击时 12% 概率追加 80% 伤害',trigger:{type:'extra',chance:12,power:.8}}]},
+ shadow:{name:'暗影低语',icon:'🌑',pieces:['weapon','bracer','ring','necklace'],bonuses:[
+  {need:2,desc:'速度 +10%',passive:{spd:.1}},{need:3,desc:'暴击率 +8%',passive:{crit:8}},
+  {need:4,desc:'攻击时 10% 概率吸取 30% 生命',trigger:{type:'drain',chance:10,power:.3}}]},
+ holy:{name:'圣辉之拥',icon:'✨',pieces:['helmet','armor','bracelet','necklace'],bonuses:[
+  {need:2,desc:'生命 +12%',passive:{hp:.12}},{need:3,desc:'防御 +15%',passive:{def:.15}},
+  {need:4,desc:'每回合回复 3% 最大生命',trigger:{type:'regen',chance:100,power:.03}}]},
+ berserk:{name:'狂战之血',icon:'🔥',pieces:['weapon','helmet','bracer'],bonuses:[
+  {need:2,desc:'攻击 +10%，暴击率 +5%',passive:{atk:.1,crit:5}},
+  {need:3,desc:'暴击时额外造成 30% 伤害',trigger:{type:'critbonus',power:.3}}]},
+ chalk:{name:'白垩巡礼者',icon:'🧱',pieces:['helmet','armor','boots','necklace'],bonuses:[
+  {need:2,desc:'生命 +10%，防御 +8%',passive:{hp:.1,def:.08}},
+  {need:3,desc:'受到伤害时反弹 12%',passive:{thorns:.12}},
+  {need:4,desc:'每回合回复 4% 最大生命',trigger:{type:'regen',chance:100,power:.04}}]},
+ tear:{name:'血泪骑士',icon:'🩸',pieces:['weapon','armor','helmet','ring'],bonuses:[
+  {need:2,desc:'攻击 +10%',passive:{atk:.1}},{need:3,desc:'生命偷取 +8%',passive:{lifesteal:.08}},
+  {need:4,desc:'攻击时 15% 概率使敌人流血 3 回合',trigger:{type:'bleed',chance:15,turns:3}}]},
+ crown:{name:'铁冠军团',icon:'👑',pieces:['helmet','armor','bracer','boots'],bonuses:[
+  {need:2,desc:'防御 +12%',passive:{def:.12}},{need:3,desc:'生命 +15%',passive:{hp:.15}},
+  {need:4,desc:'受到攻击时 15% 概率反击 70% 攻击伤害',trigger:{type:'counter',chance:15,power:.7}}]},
+ thorn:{name:'荆棘卫队',icon:'🌿',pieces:['weapon','bracer','boots','ring'],bonuses:[
+  {need:2,desc:'防御 +8%，速度 +5%',passive:{def:.08,spd:.05}},
+  {need:3,desc:'反伤 +10%',passive:{thorns:.1}},
+  {need:4,desc:'攻击时 12% 概率使敌人中毒',trigger:{type:'bleed',chance:12,turns:3}}]},
+ frost:{name:'永冻王座',icon:'❄️',pieces:['weapon','helmet','armor','ring'],bonuses:[
+  {need:2,desc:'生命 +8%，暴击 +5%',passive:{hp:.08,crit:5}},
+  {need:3,desc:'攻击时 12% 概率冰冻',trigger:{type:'freeze',chance:12,turns:1}},
+  {need:4,desc:'冰系伤害 +20%',passive:{iceDamage:.2}}]},
+ star:{name:'星轨观测者',icon:'🌌',pieces:['weapon','bracelet','necklace','boots'],bonuses:[
+  {need:2,desc:'斗气 +12%',passive:{mp:.12}},{need:3,desc:'速度 +12%',passive:{spd:.12}},
+  {need:4,desc:'技能冷却额外缩短 1 回合',passive:{cooldown:1}}]}
+};
+function hcxTraitBuild(def,rar,unique){
+  const t={id:def.id,n:def.n,unique:!!unique};
+  if(def.k){
+    const v=def.v+def.step*rar;t.kind='passive';t.passive={[def.k]:v};
+    t.desc=def.k==='crit'?`暴击率 +${v.toFixed(1)}%`:['lifesteal','thorns'].includes(def.k)?`${def.k==='lifesteal'?'生命偷取':'反伤'} +${(v*100).toFixed(1)}%`:`${({atk:'攻击力',def:'防御力',hp:'生命',mp:'斗气',spd:'速度'})[def.k]} +${(v*100).toFixed(1)}%`;
+  }else if(def.passive){
+    t.kind='passive';const m=unique?1+rar*.09:1;t.passive={};Object.keys(def.passive).forEach(k=>t.passive[k]=def.passive[k]*m);
+    t.desc=Object.entries(t.passive).map(([k,v])=>`${k} +${(v*100).toFixed(1)}%`).join('，');
+  }else{
+    const chance=def.chance===undefined?0:Math.min(100,(def.chance||0)+(def.step||0)*rar)*(unique?1.3:1);
+    const power=def.power===undefined?0:(def.power+(def.pstep||0)*rar)*(unique?1.5:1);
+    t.kind='trigger';t.trigger={type:def.type,chance,power,turns:def.turns||1};
+    t.desc=def.type==='extra'?`攻击时 ${Math.round(chance)}% 概率追加 ${Math.round(power*100)}% 伤害`:
+      def.type==='drain'?`攻击时 ${Math.round(chance)}% 概率回复 ${Math.round(power*100)}% 伤害的生命`:
+      def.type==='critbonus'?`暴击时额外造成 ${Math.round(power*100)}% 伤害`:
+      def.type==='counter'?`受到攻击时 ${Math.round(chance)}% 概率反击 ${Math.round(power*100)}% 攻击伤害`:
+      def.type==='regen'?`每回合 ${Math.round(chance)}% 概率回复 ${Math.round(power*100)}% 最大生命`:
+      def.type==='killmp'?`击杀敌人回复 ${Math.round(power*100)}% 最大斗气`:`攻击时 ${Math.round(chance)}% 概率施加${({bleed:'流血',burn:'灼烧',freeze:'冰冻',stun:'眩晕'})[def.type]||'异常'} ${def.turns||1} 回合`;
+  }
+  return t;
+}
+function hcxRollTraits(rar){
+  const unique=pick(HCX_UNIQUES),out=[hcxTraitBuild(unique,rar,true)],used=new Set([unique.id]);
+  const count=[0,1,1,2,2,3,3,4,4][rar]||0;
+  for(let i=0;i<count;i++){
+    const pool=Math.random()<.58?HCX_PASSIVES:HCX_TRIGGERS;
+    const d=pool.find(x=>!used.has(x.id))||null;
+    if(!d)break;used.add(d.id);out.push(hcxTraitBuild(d,rar,false));
+  }
+  return out;
+}
+function hcxRollSet(slot,rar){
+  if(rar<4||Math.random()>.30)return null;
+  const eligible=Object.keys(HCX_SETS).filter(k=>HCX_SETS[k].pieces.includes(slot));
+  return eligible.length?pick(eligible):null;
+}
+function hcxWeaponName(req,rar){
+  const k=req||'common',leg=HCX_LEGENDS[k]||HCX_LEGENDS.common;
+  if(rar===8&&Math.random()<.55)return '【'+pick(leg)+'】';
+  const base=pick(HCX_WEAPON_BASE[k]||HCX_WEAPON_BASE.common);
+  if(rar===0)return base;
+  if(rar>=5&&Math.random()<.35)return pick(HCX_PRE[rar])+'·'+base+'·'+pick(leg).split('·').pop();
+  return pick(HCX_PRE[rar])+'·'+base+(Math.random()<.55?pick(HCX_SUF[rar]):'');
+}
+function hcxPassiveBonuses(){
+  const b={atk:0,def:0,hp:0,mp:0,spd:0,crit:0,lifesteal:0,thorns:0,iceDamage:0,cooldown:0},counts={},triggers=[];
+  for(const it of Object.values(S.equip||{})){
+    if(!it)continue;
+    (it.traits||[]).forEach(t=>{
+      if(t.kind==='passive')Object.entries(t.passive||{}).forEach(([k,v])=>{if(k in b)b[k]+=Number(v)||0;});
+      else if(t.kind==='trigger'&&t.trigger)triggers.push({...t.trigger,name:t.n});
+    });
+    if(it.setName&&HCX_SETS[it.setName])counts[it.setName]=(counts[it.setName]||0)+1;
+  }
+  Object.entries(counts).forEach(([sid,n])=>HCX_SETS[sid].bonuses.forEach(x=>{
+    if(n>=x.need&&x.passive)Object.entries(x.passive).forEach(([k,v])=>{if(k in b)b[k]+=v;});
+    if(n>=x.need&&x.trigger)triggers.push({...x.trigger,name:HCX_SETS[sid].name});
+  }));
+  return {b,triggers,counts};
+}
+function hcxTraitHtml(it){
+  if(!it)return '';
+  const set=it.setName&&HCX_SETS[it.setName]?`<div class="small" style="color:#c49cff">套装：${HCX_SETS[it.setName].icon} ${HCX_SETS[it.setName].name}</div>`:'';
+  return set+(it.traits||[]).map(t=>`<div class="small" style="color:${t.unique?'#e5bd72':'#a9a08d'}">${t.unique?'★':'◆'} <b>${escapeHtml(t.n)}</b>：${escapeHtml(t.desc||'')}</div>`).join('');
+}
+function hcxDamageEnemy(amount){
+  if(!B||!B.enemy)return 0;
+  let dmg=Math.max(0,Math.round(Number(amount)||0));
+  const absorbed=Math.min(B.enemyShield||0,dmg);
+  if(absorbed>0){B.enemyShield=Math.max(0,(B.enemyShield||0)-absorbed);dmg-=absorbed;B.log.push({t:'sys',m:'🛡️ 敌方护盾吸收 '+fmt(absorbed)+' 点伤害'});}
+  B.enemy.hp=Math.max(0,B.enemy.hp-dmg);
+  return dmg;
+}
+function hcxApplyAttackTraits(total,crit){
+  if(!B||!B.enemy||!B.enemyStatus)return;
+  const ps=playerStats(),pack=hcxPassiveBonuses();let extra=0;
+  if(pack.b.lifesteal>0){const h=Math.round(total*pack.b.lifesteal);S.hp=Math.min(ps.hp,S.hp+h);if(h)B.log.push({t:'heal',m:'🩸 生命偷取 +'+fmt(h)});}
+  for(const tr of pack.triggers){
+    if(tr.type==='critbonus'){if(crit)extra+=Math.round(total*(tr.power||0));continue;}
+    if(Math.random()*100>=(tr.chance||0))continue;
+    if(tr.type==='extra'){const d=Math.round(total*(tr.power||0));extra+=d;B.log.push({t:'crit',m:'✦ '+tr.name+' 追加 '+fmt(d)+' 伤害'});}
+    if(tr.type==='drain'){const h=Math.round(total*(tr.power||0));S.hp=Math.min(ps.hp,S.hp+h);B.log.push({t:'heal',m:'✦ '+tr.name+' 回复 '+fmt(h)+' 生命'});}
+    if(['bleed','burn','freeze','stun'].includes(tr.type)){B.enemyStatus[tr.type]=Math.max(B.enemyStatus[tr.type]||0,tr.turns||1);B.log.push({t:'sys',m:'✦ '+tr.name+' 触发：'+tr.type+' '+(tr.turns||1)+' 回合'});}
+  }
+  if(extra>0)hcxDamageEnemy(extra);
+}
+function hcxApplyDefenseTraits(dmg){
+  if(!B||!B.enemy)return;
+  const pack=hcxPassiveBonuses(),ps=playerStats();let reflect=Math.round(dmg*(pack.b.thorns||0));
+  if(S.cls==='guardian'&&S.level>=30)reflect+=Math.round(dmg*.12);
+  if(S.cls==='priest'&&S.level>=30&&Math.random()<.2){const heal=Math.round(ps.hp*.05);S.hp=Math.min(ps.hp,S.hp+heal);B.log.push({t:'heal',m:'✨ 信仰壁垒回复 '+fmt(heal)+' 生命'});}
+  for(const tr of pack.triggers)if(tr.type==='counter'&&Math.random()*100<(tr.chance||0))reflect+=Math.round(ps.atk*(tr.power||.5));
+  if(reflect>0){hcxDamageEnemy(reflect);B.log.push({t:'dmg',m:'↩️ 装备反击/反伤 '+fmt(reflect)});}
+}
+function hcxRegen(){
+  if(!B||B.over)return;
+  const ps=playerStats(),pack=hcxPassiveBonuses();
+  if(S.cls==='mage'&&S.level>=30)S.mp=Math.min(ps.mp,S.mp+Math.max(1,Math.round(ps.mp*.03)));
+  if(S.cls==='summoner'&&S.level>=30)S.hp=Math.min(ps.hp,S.hp+Math.max(1,Math.round(ps.hp*.02)));
+  for(const tr of pack.triggers)if(tr.type==='regen'&&Math.random()*100<(tr.chance||0)){
+    const h=Math.round(ps.hp*(tr.power||.03));S.hp=Math.min(ps.hp,S.hp+h);if(h)B.log.push({t:'heal',m:'🌿 '+tr.name+' 回复 '+fmt(h)+' 生命'});
+  }
+}
+function hcxKillTraits(){
+  const ps=playerStats(),pack=hcxPassiveBonuses();
+  for(const tr of pack.triggers)if(tr.type==='killmp'){const n=Math.round(ps.mp*(tr.power||.05));S.mp=Math.min(ps.mp,S.mp+n);}
+}
+const HCX_PASSIVE_SKILLS = {
+ sword:[[10,'剑意初成','连续使用剑技，第4次攻击伤害 +30%'],[30,'剑心','暴击时回复 3% 最大生命'],[60,'万剑归宗','技能伤害 +12%']],
+ spear:[[10,'长枪不倒','受到攻击时有概率减伤'],[30,'破甲','攻击无视少量防御'],[60,'龙威','攻击 BOSS 伤害 +15%']],
+ mage:[[10,'元素共鸣','连续使用同元素技能伤害 +15%'],[30,'魔力涌动','每回合回复斗气'],[60,'奥术精通','法系技能伤害 +20%']],
+ priest:[[10,'圣光庇护','治疗效果 +25%'],[30,'信仰壁垒','受击时概率自疗'],[60,'神恩','低生命时减伤']],
+ summoner:[[10,'兽之心','契约兽额外强化'],[30,'灵魂连结','每回合恢复生命'],[60,'万灵之主','召唤技能伤害 +20%']],
+ archer:[[10,'鹰眼','暴击率 +5%'],[30,'穿云','攻击无视部分防御'],[60,'风之猎手','速度与先手伤害提升']],
+ alchemist:[[10,'大爆炸','火系伤害 +15%'],[30,'素材回收','击败敌人概率获得材料'],[60,'炼金狂人','所有伤害 +18%']],
+ blade:[[10,'拔刀术','战斗第一击伤害 +40%'],[30,'一之太刀','暴击伤害提升'],[60,'无念','连续命中叠加伤害']],
+ fighter:[[10,'铁拳','多段技能伤害 +20%'],[30,'气合','击破护盾后恢复生命'],[60,'斗气全身','生命与防御提升']],
+ assassin:[[10,'先制','战斗第一击更容易暴击'],[30,'暗杀','暴击率 +8%'],[60,'影袭','暴击追加伤害']],
+ guardian:[[10,'铁壁','防御 +15%'],[30,'反震','受击反弹伤害'],[60,'不灭','低生命时大幅减伤']]
+};
+const HCX_ACHIEVEMENTS = [
+ ['first_blood','初阵','击败第一个敌人',()=>S.kills>=1,100],
+ ['slayer_100','百人斩','击败 100 个敌人',()=>S.kills>=100,5000],
+ ['dragon_10','屠龙者','击败 10 个 BOSS',()=>(S.bossKills||0)>=10,8000],
+ ['lv30','边境行者','达到 Lv.30',()=>S.level>=30,2000],
+ ['lv100','传说之人','达到 Lv.100',()=>S.level>=100,20000],
+ ['lv160','圣域守护者','达到 Lv.160',()=>S.level>=160,100000],
+ ['gold100k','财富之人','持有 100,000 CC',()=>S.gold>=100000,0],
+ ['rar6','传说收藏家','拥有传说级装备',()=>[...(S.inv||[]),...Object.values(S.equip||{}).filter(Boolean)].some(x=>x.rar>=6),3000],
+ ['rar8','三日月拥有者','拥有三日月装备',()=>[...(S.inv||[]),...Object.values(S.equip||{}).filter(Boolean)].some(x=>x.rar>=8),30000],
+ ['crown','圣冠觉醒','首次觉醒圣冠',()=>!!(S.crownLog||[]).length,10000],
+ ['set4','套装收集者','装备同一套装四件',()=>Object.values(hcxPassiveBonuses().counts).some(x=>x>=4),15000],
+ ['lore','星轨旅人','访问星轨纪事',()=>!!S.hcx?.visitedLore,500]
+];
+const HCX_FACTIONS = {
+ empire:{n:'尤利乌帝国',desc:'帝国任务与血泪荒原声望',enemy:'凯瑞亚复国派'},
+ kerya:{n:'凯瑞亚',desc:'七叶任务与圣木试炼',enemy:'帝国金瞳'},
+ lonbass:{n:'朗不斯商会',desc:'交易、投资与商会委托',enemy:'自由锚（部分）'},
+ threetower:{n:'三塔会',desc:'隐藏任务与圣冠线索',enemy:'圣庭正教'},
+ abyss:{n:'渊下宫',desc:'深渊副本与危险探索',enemy:'所有地表势力'}
+};
+const HCX_MARKET_FAMILIES = [
+ {id:'melus',n:'美鲁斯家族',rate:.05,risk:.10,style:'稳健'},
+ {id:'copper',n:'铜锚家族',rate:.15,risk:.35,style:'高收益'},
+ {id:'anchor',n:'金锚航运',rate:.08,risk:.18,style:'航运'},
+ {id:'anvil',n:'铁砧工坊',rate:.10,risk:.25,style:'工业'},
+ {id:'oil',n:'火油商盟',rate:.12,risk:.30,style:'能源'},
+ {id:'scale',n:'银秤银行',rate:.07,risk:.15,style:'金融'}
+];
+const HCX_MARKET_EVENTS = [
+ {n:'帝国边境军备增加',id:'anvil',mul:1.22},{n:'血泪荒原出现新矿脉',id:'oil',mul:1.2},
+ {n:'北境航路签订新约',id:'anchor',mul:1.18},{n:'美鲁斯家族陷入继承争端',id:'melus',mul:.82},
+ {n:'铜锚贸易战获胜',id:'copper',mul:1.3},{n:'圣庭颁布新税令',id:'scale',mul:.88}
+];
+const HCX_WORLD_EVENTS = [
+ {id:'starfall',n:'🌌 星轨残骸坠落',desc:'野外 BOSS 出现率提高，战利品收益增加',effect:'drop'},
+ {id:'bloodtide',n:'🩸 血泪荒原血潮',desc:'敌人更强，击败后获得额外材料',effect:'blood'},
+ {id:'guild',n:'⚔️ 公会集结',desc:'公会贡献与副本奖励提升',effect:'guild'},
+ {id:'meteor',n:'💫 流星雨',desc:'探索金币收益提高',effect:'gold'},
+ {id:'echo',n:'📜 失落回声',desc:'试炼与技能研究进度提高',effect:'skill'}
+];
+function hcxActiveEvent(){
+  const cycle=3*60*60*1000,idx=Math.floor(Date.now()/cycle),n=((idx*7919)%HCX_WORLD_EVENTS.length+HCX_WORLD_EVENTS.length)%HCX_WORLD_EVENTS.length;
+  return {...HCX_WORLD_EVENTS[n],remain:cycle-(Date.now()%cycle)};
+}
+function hcxInitSave(){
+  if(!S.hcx)S.hcx={version:HCX_VERSION,invFilter:'all',achievements:{},codex:{mobs:{},dungeons:{},npcs:{}},factions:{},story:{sword:0,choice:null},tutorial:{step:0,done:false},lonbass:null,moral:{chosen:null},mount:null,crystals:0,worldChat:[],visitedLore:false};
+  const x=S.hcx;x.version=HCX_VERSION;
+  if(!x.achievements)x.achievements={};if(!x.codex)x.codex={mobs:{},dungeons:{},npcs:{}};
+  if(!x.factions)x.factions={};if(!x.story)x.story={sword:0,choice:null};
+  if(!x.tutorial)x.tutorial={step:0,done:false};if(!x.moral)x.moral={chosen:null};
+  if(!x.lonbass)x.lonbass={lastDay:-1,invest:{},stocks:{},market:{},events:[]};
+  HCX_MARKET_FAMILIES.forEach(f=>{if(!x.lonbass.market[f.id])x.lonbass.market[f.id]={price:100,history:[100]};});
+  if(!x.worldChat)x.worldChat=[];if(!x.codex.mobs)x.codex.mobs={};if(!x.codex.dungeons)x.codex.dungeons={};if(!x.codex.npcs)x.codex.npcs={};
+  if(!S.invCap)S.invCap=40;if(!S.dura)S.dura={};
+  SLOTS.forEach(slot=>{if(S.equip&&S.equip[slot.id]&&x.version===HCX_VERSION&&S.dura[slot.id]===undefined)S.dura[slot.id]=100;});
+  S.bossKills=Number(S.bossKills)||0;
+}
+function hcxSettleMarket(){
+  hcxInitSave();const x=S.hcx.lonbass;if(x.lastDay===S.day)return;
+  const elapsed=Math.max(1,Math.min(30,(S.day||1)-(x.lastDay<0?S.day-1:x.lastDay)));
+  for(let d=0;d<elapsed;d++){
+    HCX_MARKET_FAMILIES.forEach(f=>{
+      const m=x.market[f.id];const drift=f.rate+rf(-f.risk,f.risk);
+      m.price=Math.max(10,Math.round(m.price*(1+drift)));m.history.push(m.price);if(m.history.length>20)m.history.shift();
+    });
+    if((S.day-d)%3===0){const ev=pick(HCX_MARKET_EVENTS),m=x.market[ev.id];m.price=Math.max(10,Math.round(m.price*ev.mul));x.events.unshift({day:S.day-d,msg:ev.n});}
+  }
+  x.events=x.events.slice(0,6);
+  for(const [id,inv] of Object.entries(x.invest)){if(inv&&inv.amount>0){const fam=HCX_MARKET_FAMILIES.find(f=>f.id===id);const gain=Math.round(inv.amount*f.rate*rf(0.5,1.5));S.gold+=gain;inv.amount=0;x.events.unshift({day:S.day,msg:fam.n+'投资分红 +'+fmt(gain)+' CC'});}}
+  x.lastDay=S.day;save();
+}
+function hcxRepairAll(){
+  hcxInitSave();const cost=SLOTS.reduce((sum,slot)=>{const it=S.equip[slot.id];return sum+(it?Math.round((100-(S.dura[slot.id]??100))*12*(1+it.rar*.4)):0);},0);
+  if(cost<=0){notify('装备耐久完好');return;}if(S.gold<cost){notify('维修需要 '+fmt(cost)+' CC');return;}
+  S.gold-=cost;SLOTS.forEach(slot=>{if(S.equip[slot.id])S.dura[slot.id]=100;});save();render();notify('装备修复完毕，花费 '+fmt(cost)+' CC');
+}
+function hcxLoseDurability(){
+  hcxInitSave();SLOTS.forEach(slot=>{if(S.equip[slot.id])S.dura[slot.id]=Math.max(0,(S.dura[slot.id]??100)-rnd(2,5));});
+}
+function hcxExpandBag(){
+  hcxInitSave();const cap=S.invCap||40,cost=2000+cap*100;
+  if(cap>=80){notify('背包已达到 80 格上限');return;}if(S.gold<cost){notify('需要 '+fmt(cost)+' CC');return;}
+  S.gold-=cost;S.invCap=Math.min(80,cap+10);save();render();notify('背包扩展至 '+S.invCap+' 格');
+}
+function hcxResetBuild(){
+  if(!S.adv&&!S.sub){notify('尚未进阶，无需洗点');return;}
+  if(S.gold<5000){notify('洗点需要 5,000 CC');return;}
+  if(!confirm('洗点将清除当前进阶与副职业，等级和装备保留。确定吗？'))return;
+  S.gold-=5000;S.adv=null;S.sub=null;S.hp=playerStats().hp;S.mp=playerStats().mp;save();render();notify('职业进阶已重置');
+}
+function hcxInvest(id,amount){
+  hcxSettleMarket();const f=HCX_MARKET_FAMILIES.find(x=>x.id===id);if(!f||amount<=0)return;
+  if(S.gold<amount){notify('CC 不足');return;}S.gold-=amount;
+  const inv=S.hcx.lonbass.invest[id]||(S.hcx.lonbass.invest[id]={amount:0,day:S.day});inv.amount+=amount;inv.day=S.day;
+  save();render();notify('已投资 '+f.n+' '+fmt(amount)+' CC，将在游戏日结算');
+}
+function hcxBuyStock(id,shares){
+  hcxSettleMarket();const x=S.hcx.lonbass,m=x.market[id];if(!m||shares<=0)return;
+  const cost=m.price*shares;if(S.gold<cost){notify('CC 不足');return;}S.gold-=cost;
+  const st=x.stocks[id]||(x.stocks[id]={shares:0,cost:0});st.shares+=shares;st.cost+=cost;save();render();notify('购入 '+shares+' 股');
+}
+function hcxSellStock(id){
+  hcxSettleMarket();const x=S.hcx.lonbass,st=x.stocks[id],m=x.market[id];if(!st||!m||!st.shares)return;
+  const value=m.price*st.shares,profit=value-st.cost;S.gold+=value;delete x.stocks[id];save();render();notify('售出股份，'+(profit>=0?'盈利 ':'亏损 ')+fmt(Math.abs(profit))+' CC');
+}
+function hcxMoralChoice(id){
+  hcxInitSave();if(S.hcx.moral.chosen){notify('阵营选择不可更改');return;}
+  if(!['chain','anchor'].includes(id))return;
+  S.hcx.moral.chosen=id;S.gold+=id==='chain'?8000:3000;
+  const title=id==='chain'?'铁索掌控者':'自由之锚';if(!S.titles.includes(title))S.titles.push(title);
+  save();render();notify('已加入'+(id==='chain'?'铁索家族':'自由锚')+'，获得称号「'+title+'」');
+}
+function hcxFactionRep(id,amount){
+  hcxInitSave();if(!HCX_FACTIONS[id])return;
+  S.hcx.factions[id]=clamp((S.hcx.factions[id]||0)+amount,0,10000);save();
+}
+function hcxCheckAchievements(){
+  if(!S)return;hcxInitSave();let changed=false;
+  HCX_ACHIEVEMENTS.forEach(a=>{
+    if(S.hcx.achievements[a[0]])return;
+    let ok=false;try{ok=!!a[3]();}catch(e){}
+    if(ok){S.hcx.achievements[a[0]]=Date.now();if(a[4])S.gold+=a[4];changed=true;notify('🏆 成就达成：'+a[1]);}
+  });
+  if(changed)save();
+}
+function hcxSfx(){
+  let ctx=null,enabled=true;
+  function tone(freq,dur,type='sine',vol=.045){
+    if(!enabled)return;
+    try{ctx=ctx||(window.AudioContext?new AudioContext():null);if(!ctx)return;if(ctx.state==='suspended')ctx.resume();
+      const o=ctx.createOscillator(),g=ctx.createGain();o.type=type;o.frequency.value=freq;g.gain.setValueAtTime(vol,ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+dur);o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+dur);
+    }catch(e){}
+  }
+  return {toggle(){enabled=!enabled;return enabled;},hit(){tone(150,.08,'square',.035);},crit(){tone(640,.12,'sawtooth',.06);setTimeout(()=>tone(880,.1,'square',.04),80);},
+    heal(){tone(780,.16);setTimeout(()=>tone(1040,.13),100);},win(){[523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,.2,'triangle',.06),i*100));},
+    level(){[523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,.18,'sine',.06),i*90));},coin(){tone(1200,.07);},skill(){tone(440,.12,'triangle');}};
+}
+const HCX_SFX=hcxSfx();
+function hcxFloat(text,color='#fff',top='40%',size=22){
+  let layer=document.getElementById('hcxFloatLayer');
+  if(!layer){layer=document.createElement('div');layer.id='hcxFloatLayer';layer.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:9999;overflow:hidden';document.body.appendChild(layer);}
+  const el=document.createElement('div');el.textContent=text;
+  el.style.cssText=`position:absolute;left:50%;top:${top};transform:translate(-50%,-50%);font-weight:800;font-size:${size}px;color:${color};text-shadow:0 0 10px ${color},0 2px 5px #000;animation:hcxFloatUp 1.1s ease-out forwards`;
+  layer.appendChild(el);setTimeout(()=>el.remove(),1150);
+  if(!document.getElementById('hcxFloatStyle')){const st=document.createElement('style');st.id='hcxFloatStyle';st.textContent='@keyframes hcxFloatUp{0%{opacity:1;transform:translate(-50%,-30%) scale(.7)}25%{opacity:1;transform:translate(-50%,-70%) scale(1.15)}100%{opacity:0;transform:translate(-50%,-180%) scale(1)}}';document.head.appendChild(st);}
+}
+function hcxRenderWorldBanner(){
+  const ev=hcxActiveEvent();
+  return `<div class="card" style="padding:10px 14px;border-color:rgba(173,140,255,.45);background:linear-gradient(120deg,#17182a,#21182a);display:flex;gap:12px;align-items:center">
+    <svg width="58" height="48" viewBox="0 0 100 80" aria-label="星轨圣冠图案"><defs><linearGradient id="hcxg" x2="0" y2="1"><stop stop-color="#fff0c5"/><stop offset="1" stop-color="#a77b39"/></linearGradient></defs><path d="M10 60 L24 18 L42 48 L52 8 L66 48 L82 18 L92 60Z" fill="none" stroke="url(#hcxg)" stroke-width="4"/><path d="M10 64 Q50 76 92 64" fill="none" stroke="#79d8d0" stroke-width="3"/><circle cx="52" cy="8" r="4" fill="#fff0c5"/></svg>
+    <div style="flex:1"><div class="hl">${ev.n}</div><div class="small">${ev.desc}</div><div class="small" style="color:#ad8cff">世界轮转：${fmtT(ev.remain)} 后更替</div></div></div>`;
+}
+function hcxRenderExpansion(){
+  hcxInitSave();hcxSettleMarket();
+  const x=S.hcx,ev=hcxActiveEvent(),rep=id=>x.factions[id]||0;
+  if(!x.visitedLore){x.visitedLore=true;hcxCheckAchievements();save();}
+  const storyNames=['剑圣·序','剑圣·过客','剑圣·大和','剑圣·我流','剑圣·万象浮生','剑圣·剑心','剑圣·终'];
+  const storyDesc=['在樱落的边境村庄，遇见一名不肯拔剑的旅人。','沿着白垩大道追寻无名剑客留下的剑痕。','进入大和旧都，寻找失落的剑谱。','以自己的方式完成剑术试炼。','面对万象浮生，证明剑心并非招式的堆叠。','挑战剑圣的最终试炼。','见证剑圣传承的终章。'];
+  const storyDone=x.story.sword;
+  const weather=['晴朗','薄雾','细雨','星尘夜'];const widx=Math.floor(Date.now()/3600000)%4;
+  const codexCounts=Object.values(x.codex).reduce((a,v)=>a+Object.keys(v||{}).length,0);
+  const achievements=Object.keys(x.achievements).length;
+  return `<div class="hcx-banner" style="border:1px solid rgba(229,189,114,.3);border-radius:12px;padding:16px;margin-bottom:12px;background:radial-gradient(circle at 75% 20%,rgba(121,216,208,.2),transparent 30%),linear-gradient(130deg,#202033,#11101b);position:relative;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:12px"><div style="font-size:38px;filter:drop-shadow(0 0 12px #e5bd72)">👑</div><div><div style="font-size:20px;color:#fff0c5;letter-spacing:3px">星轨纪事</div><div class="small">阿斯米德约顿 · 九大陆冒险录 · 扩展版本 ${HCX_VERSION/10}.0</div></div></div>
+    <p class="small" style="margin-top:8px">星轨残骸横贯九大陆，白垩城墙分割旧王国。你所做的选择，将被势力、商会与古老圣冠记录。</p>
+  </div>
+  ${hcxRenderWorldBanner()}
+  <div class="card"><h3>🧭 世界与天气</h3><div class="row"><span class="k">当前时象</span><span class="v">${weather[widx]} · ${new Date().getHours()<6?'深夜':new Date().getHours()<11?'清晨':new Date().getHours()<18?'白昼':'黄昏'}</span></div>
+  <div class="grid">${['嘉特夫海尔','华纳维勒','米德海姆','尼福尔','赫尔约海姆','穆斯贝尔','海姆垩','乌尔安恭','伽利兰提尔'].map((n,i)=>`<div class="resource-cell"><span>✦ ${n}</span><span class="small">${i<3?'核心大陆':'远境'}</span></div>`).join('')}</div>
+  <p class="small" style="margin-top:8px">九大道由古老星轨残骸构成，跨越大陆需支付神物碎片。黄金海、深渊与活动副本位于核心大陆之外。</p></div>
+  <div class="card"><h3>⚔️ 七元素与战斗策略</h3><div class="grid">${Object.entries(HCX_ELEMENTS).map(([k,v])=>`<div class="resource-cell"><span>${v.ic} ${v.n}</span><span class="small">${Object.entries(HCX_COUNTER).filter(([a,bs])=>a===k).map(([a,bs])=>bs.map(b=>HCX_ELEMENTS[b].n).join('、')).join('')||'无直接优势'}</span></div>`).join('')}</div>
+  <p class="small" style="margin-top:8px">克制伤害 ×1.5；被克制伤害 ×0.7。职业基础元素与技能名称共同决定攻击元素，BOSS 拥有独立弱点。</p></div>
+  <div class="card"><h3>🏰 势力声望</h3><p class="small">声望由探索与任务推进；陌生 → 熟识 → 尊敬 → 崇敬 → 崇拜。${S.guildId?'　公会集结点数：'+(x.guildEventPoints||0):''}</p>
+  ${Object.entries(HCX_FACTIONS).map(([id,f])=>`<div class="row"><span class="k">${f.n}<br><span class="small">${f.desc}</span></span><span class="v">${fmt(rep(id))} / 10000</span></div>`).join('')}
+  <div class="small" style="margin-top:6px">完成战斗、探索和剧情可获得对应势力声望。势力关系会影响后续商店与剧情开放。</div></div>
+  <div class="card"><h3>📜 剑圣七部曲</h3><p class="small">剑圣系列从剧情探索开始，逐步解锁试炼。选择会影响后续路线。</p>
+  ${storyNames.map((n,i)=>`<div class="item"><span class="iname"><b class="${i<storyDone?'ok':'hl'}">${i<storyDone?'✓':'○'} ${n}</b><br><span class="small">${storyDesc[i]}</span></span>${i===storyDone?`<button data-hcx="storyNext" data-arg="${i}" ${S.level<Math.max(1,i*8+1)?'disabled':''}>进入</button>`:''}</div>`).join('')}
+  ${storyDone===7&&!x.story.choice?`<div class="flex"><button data-hcx="storyChoice" data-arg="inherit">继承剑圣之名</button><button data-hcx="storyChoice" data-arg="challenge">挑战剑圣</button><button data-hcx="storyChoice" data-arg="leave">离开此道</button></div>`:''}
+  ${x.story.choice?`<div class="small ok">已选择：${({inherit:'继承剑圣之名',challenge:'挑战剑圣',leave:'离开此道'})[x.story.choice]}</div>`:''}</div>
+  <div class="card"><h3>💰 朗不斯投资交易所</h3><p class="small">股价随游戏日、商路消息和势力事件波动；投资可能盈利，也可能亏损。</p>
+  ${x.lonbass.events.slice(0,3).map(e=>`<div class="small">${e.day}日 · ${escapeHtml(e.msg)}</div>`).join('')}
+  ${HCX_MARKET_FAMILIES.map(f=>{const m=x.lonbass.market[f.id],inv=x.lonbass.invest[f.id],st=x.lonbass.stocks[f.id];return `<div class="item" style="flex-wrap:wrap"><span class="iname"><b>${f.n}</b> <span class="tag">${f.style}</span><br><span class="small">股价 ${fmt(m.price)} · 风险 ±${Math.round(f.risk*100)}% ${inv&&inv.amount?'· 投资 '+fmt(inv.amount)+' CC':''}</span>${st?`<br><span class="small">持股 ${st.shares} 股 · 当前估值 ${fmt(st.shares*m.price)} CC</span>`:''}</span><span style="display:flex;gap:4px;flex-wrap:wrap"><button data-hcx="invest" data-arg="${f.id}|1000">投1k</button><button data-hcx="buyStock" data-arg="${f.id}|10">买10股</button>${st?`<button data-hcx="sellStock" data-arg="${f.id}">卖出</button>`:''}</span></div>`;}).join('')}</div>
+  <div class="card"><h3>⚖️ 道德抉择：铁索与自由锚</h3>${x.moral.chosen?`<div class="hl">${x.moral.chosen==='chain'?'⛓️ 铁索家族':'⚓ 自由锚'}</div><p class="small">已作出选择，阵营不可更改。</p>`:`<p class="small">铁索家族依靠奴隶贸易积累财富；自由锚以废奴运动对抗贸易链。选择将影响初始资金与称号。</p><div class="flex"><button data-hcx="moral" data-arg="chain">⛓️ 铁索（+8,000 CC）</button><button data-hcx="moral" data-arg="anchor">⚓ 自由锚（+3,000 CC）</button></div>`}</div>
+  <div class="card"><h3>🏆 成就殿堂（${achievements}/${HCX_ACHIEVEMENTS.length}）</h3>${HCX_ACHIEVEMENTS.map(a=>`<div class="row"><span class="k">${x.achievements[a[0]]?'✓':'○'} ${a[1]}<br><span class="small">${a[2]}</span></span><span class="v small">${x.achievements[a[0]]?'已完成':'未完成'}</span></div>`).join('')}</div>
+  <div class="card"><h3>📖 图鉴（${codexCounts}）</h3><p class="small">遭遇过的怪物、副本和结识的 NPC 会自动记录在这里。</p>
+  <div class="row"><span class="k">怪物</span><span class="v">${Object.keys(x.codex.mobs).length}</span></div><div class="row"><span class="k">副本</span><span class="v">${Object.keys(x.codex.dungeons).length}</span></div><div class="row"><span class="k">NPC</span><span class="v">${Object.keys(x.codex.npcs).length}</span></div></div>
+  <div class="card"><h3>🐉 坐骑与数据水晶</h3>${x.mount?`<p class="small">当前坐骑：${x.mount.name} · 成长等级 ${x.mount.lv}</p><button data-hcx="mountFeed">喂养坐骑（${fmt(x.mount.lv*300)} CC）</button>`:`<p class="small">达到 Lv.40 后可在此签订白鳞龙兽契约。</p><button data-hcx="mountBind" ${S.level<40?'disabled':''}>签订白鳞龙兽契约（5,000 CC）</button>`}
+  <div class="row"><span class="k">数据水晶</span><span class="v">${x.crystals}</span></div><button data-hcx="crystalForge" ${S.gold<1000?'disabled':''}>消耗 1,000 CC 锻造数据水晶</button><p class="small">数据水晶可用于专属装备的铭刻与锻造；本版本先开放基础锻造与储存。</p></div>
+  <div class="card"><h3>🔧 金币回收与角色维护</h3><div class="row"><span class="k">装备维修</span><span class="v">${SLOTS.reduce((n,z)=>n+(S.equip[z.id]?100-(S.dura[z.id]??100):0),0)} 耐久损失</span></div>
+  <div class="flex"><button data-hcx="repair">🔧 一键维修</button><button data-hcx="bag">🎒 扩展背包（${S.invCap||40}/80）</button><button data-hcx="resetBuild">💠 洗点（5,000 CC）</button></div></div>
+  <div class="card"><h3>📘 新手引导</h3><p class="small">${x.tutorial.done?'引导已完成。愿圣冠庇佑你的旅途。':(['欢迎来到《圣冠》。你将从外围公国开始旅程。','前往探索区域寻找敌人，击败敌人获得经验和装备。','战斗中可使用技能、药水，也可选择格挡来预判敌方攻击。','职业页面可查看成长路线，职业公所负责试炼、进阶与副职业拜师。','背包中可装备、出售与筛选装备；高品质装备拥有更多特性。','副本分为多种难度，建议准备药水并研究 BOSS 弱点。','祝你好运，冒险者。愿圣冠庇佑你。'][x.tutorial.step]||'继续探索世界。')}</p><div class="flex"><button data-hcx="tutorialNext">${x.tutorial.done?'重新阅读':'下一步'}</button><button data-hcx="tutorialSkip">跳过</button></div></div>
+  <div class="card"><h3>🔊 视听设置</h3><p class="small">战斗、暴击、治疗、胜利与升级会触发程序合成音效和伤害飘字；音效需要首次点击后由浏览器启用。</p><button data-hcx="sound">切换音效（${window.HCX_SOUND_ON===false?'关闭':'开启'}）</button></div>`;
+}
+function hcxRenderInventory(p){
+  hcxInitSave();const old=S.inv,filter=S.hcx.invFilter||'all';
+  const entries=old.map((it,i)=>({it,i})).filter(({it})=>filter==='all'||(filter==='weapon'&&it.slot==='weapon')||(filter==='armor'&&['helmet','armor','boots','bracer'].includes(it.slot))||(filter==='accessory'&&['bracelet','ring','necklace'].includes(it.slot))||(filter.startsWith('rar')&&it.rar===Number(filter.slice(3))));
+  const filtered=entries.map(x=>x.it);
+  S.inv=filtered;let out=__hcxOldRenderInv(p);S.inv=old;
+  out=out.replace(/data-act="(equip|sell|gift)" data-arg="(\d+)"/g,(m,a,n)=>`data-act="${a}" data-arg="${entries[Number(n)]?entries[Number(n)].i:n}"`);
+  out=out.replace('背包（'+old.length+'/40）','背包（'+old.length+'/'+(S.invCap||40)+'）');
+  const controls=`<div class="tabs" style="margin-bottom:10px">${[['all','全部'],['weapon','武器'],['armor','防具'],['accessory','饰品'],['rar6','传说'],['rar7','神话'],['rar8','三日月']].map(([id,n])=>`<button data-hcx="filter" data-arg="${id}" class="${filter===id?'active':''}">${n}</button>`).join('')}</div>`;
+  const traits=`<div class="card" style="margin-top:10px"><h4 style="color:#c49cff;margin-bottom:6px">✦ 装备特性与套装铭文</h4>${[...Object.values(S.equip||{}).filter(Boolean),...old].slice(0,20).map(it=>`<div class="item" style="display:block"><b class="rar${it.rar}">${escapeHtml(it.name)}</b>${hcxTraitHtml(it)}</div>`).join('')||'<div class="small">尚无装备</div>'}</div>`;
+  return controls+out+traits;
+}
+function hcxRenderCharacter(p){
+  let out=__hcxOldRenderChar(p);
+  const pass=(HCX_PASSIVE_SKILLS[S.cls]||[]).map(([lv,n,d])=>`<div class="row" style="${S.level>=lv?'':'opacity:.45'}"><span class="k">${S.level>=lv?'✓':'🔒'} ${n}（Lv.${lv}）</span><span class="v small">${d}</span></div>`).join('');
+  const durability=SLOTS.filter(z=>S.equip[z.id]).map(z=>`<div class="row"><span class="k">${z.name}</span><span class="v">${S.dura[z.id]??100}/100</span></div>`).join('');
+  return out+`<div class="card"><h3>✦ 职业被动技能</h3>${pass||'<div class="small">暂无被动技能</div>'}</div><div class="card"><h3>🛠 装备耐久</h3>${durability||'<div class="small">尚未装备物品</div>'}<button data-hcx="repair">一键维修</button></div>`;
+}
+function hcxRenderBattle(out){
+  if(!B||B.over)return out;
+  const pack=hcxPassiveBonuses(),cd=B.cd||{};
+  const weak=B.enemy.weakEle&&HCX_ELEMENTS[B.enemy.weakEle]?HCX_ELEMENTS[B.enemy.weakEle]:null;
+  const enemyStatus=B.enemyStatus||{};
+  return out+`<div class="card" style="border-color:rgba(121,216,208,.35)"><h4 style="color:#79d8d0">⚔️ 战术面板</h4><div class="small">BOSS 阶段：${B.phase||1}　敌方弱点：${weak?weak.ic+' '+weak.n:'未探明'}　元素克制：×1.5 / ×0.7　${B.enemyShield>0?'护盾 '+fmt(B.enemyShield):''}</div>
+  <div class="small">敌方异常：${Object.entries(enemyStatus).filter(([k,v])=>v>0).map(([k,v])=>k+' '+v+'回合').join('、')||'无'}</div>
+  <div class="small">技能冷却：${Object.entries(cd).filter(([k,v])=>v>0).map(([k,v])=>k+' '+v+'回合').join('、')||'无'}</div>
+  <button data-hcx="guard" ${B.busy||B.status.freeze>0||B.status.stun>0?'disabled':''} style="width:100%;margin-top:8px;background:linear-gradient(135deg,#173638,#192236);border-color:#79d8d0">🛡️ 格挡架势（下一击减伤 60%，回复 10% 斗气）</button></div>`;
+}
+function hcxHandleAction(action,arg){
+  hcxInitSave();
+  if(action==='filter'){S.hcx.invFilter=arg;render();return true;}
+  if(action==='repair'){hcxRepairAll();return true;}
+  if(action==='bag'){hcxExpandBag();return true;}
+  if(action==='resetBuild'){hcxResetBuild();return true;}
+  if(action==='invest'){const [id,n]=arg.split('|');hcxInvest(id,Number(n));return true;}
+  if(action==='buyStock'){const [id,n]=arg.split('|');hcxBuyStock(id,Number(n));return true;}
+  if(action==='sellStock'){hcxSellStock(arg);return true;}
+  if(action==='moral'){hcxMoralChoice(arg);return true;}
+  if(action==='storyNext'){
+    const i=Number(arg);if(i!==S.hcx.story.sword)return true;
+    S.hcx.story.sword=Math.min(7,i+1);hcxFactionRep('threetower',100);save();render();notify('剧情推进：'+['剑圣·序','剑圣·过客','剑圣·大和','剑圣·我流','剑圣·万象浮生','剑圣·剑心','剑圣·终'][i]);return true;
+  }
+  if(action==='storyChoice'){S.hcx.story.choice=arg;if(arg==='inherit'&&!S.titles.includes('剑圣传承者'))S.titles.push('剑圣传承者');if(arg==='challenge'&&!S.titles.includes('剑圣挑战者'))S.titles.push('剑圣挑战者');save();render();return true;}
+  if(action==='tutorialNext'){S.hcx.tutorial.step++;if(S.hcx.tutorial.step>=7)S.hcx.tutorial.done=true;save();render();return true;}
+  if(action==='tutorialSkip'){S.hcx.tutorial.done=true;save();render();return true;}
+  if(action==='mountBind'){if(S.level<40||S.gold<5000){notify('需要 Lv.40 与 5,000 CC');return true;}S.gold-=5000;S.hcx.mount={name:'白鳞龙兽',lv:1};const mp=playerStats();S.hp=Math.min(mp.hp,S.hp+15);save();render();notify('白鳞龙兽已签订契约，属性获得提升');return true;}
+  if(action==='mountFeed'){const m=S.hcx.mount,c=m.lv*300;if(S.gold<c||m.lv>=S.level){notify('金币不足或坐骑等级已达上限');return true;}S.gold-=c;m.lv++;const mp=playerStats();S.hp=Math.min(mp.hp,S.hp+15);save();render();notify('坐骑成长至 Lv.'+m.lv+'，属性获得提升');return true;}
+  if(action==='crystalForge'){if(S.gold<1000)return true;S.gold-=1000;S.hcx.crystals++;save();render();notify('获得数据水晶 ×1');return true;}
+  if(action==='sound'){const on=HCX_SFX.toggle();window.HCX_SOUND_ON=on;notify('音效已'+(on?'开启':'关闭'));render();return true;}
+  if(action==='guard'){
+    if(!B||B.over||B.busy||B.status.freeze>0||B.status.stun>0)return true;
+    B.busy=true;B.guard=1;const p=playerStats();S.mp=Math.min(p.mp,S.mp+Math.round(p.mp*.1));
+    B.log.push({t:'sys',m:'🛡️ 你采取防御架势，下一次受到的伤害降低 60%，并回复 10% 斗气'});render();
+    setTimeout(()=>{if(B&&!B.over)enemyTurn();},180);return true;
+  }
+  return false;
+}
+
+/* 覆盖原装备生成与清洗：兼容旧物品，不丢失旧字段 */
+const __hcxOldSanitizeItem=sanitizeItem;
+sanitizeItem=function(it){
+  const o=__hcxOldSanitizeItem(it);if(!o)return null;
+  o.traits=[];
+  if(Array.isArray(it.traits))for(const t of it.traits.slice(0,6)){
+    if(!t||typeof t.id!=='string'||typeof t.n!=='string')continue;
+    const z={id:String(t.id).slice(0,40),n:String(t.n).slice(0,24),unique:!!t.unique,kind:t.kind==='trigger'?'trigger':'passive',desc:String(t.desc||'').slice(0,100)};
+    if(z.kind==='passive'&&t.passive&&typeof t.passive==='object'){
+      z.passive={};['atk','def','hp','mp','spd','crit','lifesteal','thorns','iceDamage','cooldown'].forEach(k=>{const v=Number(t.passive[k]);if(Number.isFinite(v)&&v!==0)z.passive[k]=clamp(v,-5,5);});
+    }else if(z.kind==='trigger'&&t.trigger&&typeof t.trigger==='object'){
+      z.trigger={type:String(t.trigger.type||'extra').slice(0,20),chance:clamp(Number(t.trigger.chance)||0,0,100),power:clamp(Number(t.trigger.power)||0,0,10),turns:clamp(Math.round(Number(t.trigger.turns)||1),1,5)};
+    }else continue;
+    o.traits.push(z);
+  }
+  o.setName=typeof it.setName==='string'&&HCX_SETS[it.setName]?it.setName:null;
+  return o;
+};
+const __hcxOldGenEquip=genEquip;
+genEquip=function(slot,ilvl,rarIdx,classReq){
+  const rar=rarIdx!==undefined?clamp(Math.round(rarIdx),0,8):Math.min(8,Math.floor(Math.random()*Math.random()*9));
+  const item=__hcxOldGenEquip(slot,ilvl,rar,classReq);
+  if(slot==='weapon')item.name=hcxWeaponName(classReq||null,rar);
+  item.traits=hcxRollTraits(rar);
+  item.setName=hcxRollSet(slot,rar);
+  return item;
+};
+const __hcxOldFixSaveData=fixSaveData;
+fixSaveData=function(){
+  __hcxOldFixSaveData();
+  if(!S)return;hcxInitSave();
+  S.inv=(S.inv||[]).map(sanitizeItem).filter(Boolean);
+  SLOTS.forEach(z=>{const it=sanitizeItem(S.equip[z.id]);S.equip[z.id]=it&&it.slot===z.id?it:null;});
+  S.inv.forEach(it=>{if(!it.traits||!it.traits.length)it.traits=hcxRollTraits(it.rar);});
+  SLOTS.forEach(z=>{const it=S.equip[z.id];if(it&&(!it.traits||!it.traits.length))it.traits=hcxRollTraits(it.rar);});
+};
+const __hcxOldPlayerStats=playerStats;
+playerStats=function(){
+  const st=__hcxOldPlayerStats();if(!S)return st;
+  const pack=hcxPassiveBonuses(),b=pack.b;
+  ['atk','def','hp','mp','spd'].forEach(k=>{st[k]=Math.round(st[k]*(1+(b[k]||0)));});
+  st.crit=Math.round(st.crit+(b.crit||0));
+  if(S.level>=10&&S.cls==='archer')st.crit+=5;
+  if(S.level>=30&&S.cls==='assassin')st.crit+=8;
+  const pass=HCX_PASSIVE_SKILLS[S.cls]||[];
+  pass.forEach(([lv,n])=>{if(S.level>=lv){
+    if(n==='鹰眼')st.crit+=5;
+    if(n==='铁壁')st.def=Math.round(st.def*1.15);
+    if(n==='斗气全身'){st.hp=Math.round(st.hp*1.15);st.def=Math.round(st.def*1.1);}
+  }});
+  return st;
+};
+const __hcxOldEquipScore=equipScore;
+equipScore=function(it){
+  let v=__hcxOldEquipScore(it);(it&&it.traits||[]).forEach(t=>{
+    if(t.kind==='passive')Object.entries(t.passive||{}).forEach(([k,n])=>v+=n*({atk:200,def:150,hp:80,mp:50,spd:150,crit:3,lifesteal:120,thorns:120}[k]||0));
+    if(t.unique)v+=40;
+  });
+  if(it&&it.setName)v+=30;return v;
+};
+const __hcxOldMakeEnemy=makeEnemy;
+makeEnemy=function(name,lv,isBoss){
+  const e=__hcxOldMakeEnemy(name,lv,isBoss);
+  e.weakEle=pick(Object.keys(HCX_ELEMENTS));e.element=pick(Object.keys(HCX_ELEMENTS));
+  if(hcxActiveEvent().effect==='blood'){
+    e.maxHp=Math.round(e.maxHp*1.15);e.hp=Math.round(e.hp*1.15);e.atk=Math.round(e.atk*1.12);e.def=Math.round(e.def*1.08);e.worldEvent='bloodtide';
+  }
+  return e;
+};
+const __hcxOldStartBattle=startBattle;
+startBattle=function(enemy,opts){
+  if(!enemy.weakEle)enemy.weakEle=pick(Object.keys(HCX_ELEMENTS));
+  __hcxOldStartBattle(enemy,opts);
+  if(B){B.enemyStatus={bleed:0,burn:0,freeze:0,stun:0};B.enemyShield=0;B.cd={};B.guard=0;B.phase=1;B.phaseSkillRate=0;B.combo={element:null,count:0};B.firstStrike=true;
+    hcxInitSave();S.hcx.codex.mobs[enemy.name]=true;save();}
+};
+const __hcxOldRenderInv=renderInv;
+const __hcxOldRenderChar=renderChar;
+const __hcxOldRenderView=renderView;
+renderView=function(p){
+  if(UI.tab==='expansion')return hcxRenderExpansion();
+  if(UI.tab==='inv')return hcxRenderInventory(p);
+  if(UI.tab==='char')return hcxRenderCharacter(p);
+  return __hcxOldRenderView(p);
+};
+const __hcxOldRenderBattle=renderBattle;
+renderBattle=function(){return hcxRenderBattle(__hcxOldRenderBattle());};
+const __hcxOldRenderMain=renderMain;
+renderMain=function(){
+  let out=__hcxOldRenderMain();
+  out=out.replace(/(<button[^>]*data-act="tab" data-arg="social"[^>]*>社交<\/button>)/, '$1<button class="'+(UI.tab==='expansion'?'active':'')+'" data-act="tab" data-arg="expansion">星轨志</button>');
+  out=out.replace('<div class="topbar">','<div class="topbar">');
+  out=out.replace('</div>\n  <div class="card" style="padding:10px 14px">','</div>\n  '+hcxRenderWorldBanner()+'\n  <div class="card" style="padding:10px 14px">');
+  return out;
+};
+const __hcxOldEnemyTurn=enemyTurn;
+enemyTurn=async function(){
+  if(!B||B.over)return;
+  const e=B.enemy;
+  // BOSS 血线阶段：每个阈值只触发一次，提升属性并获得护盾
+  if(e.isBoss){
+    const phases=[{at:.7,msg:'💢 BOSS 进入第二阶段！攻击提升 20%',atk:1.2,shield:.08},
+      {at:.4,msg:'🔥 BOSS 进入第三阶段！攻防提升，技能频率提高',atk:1.3,def:1.15,shield:.12},
+      {at:.15,msg:'☠️ BOSS 濒死狂乱！攻击大幅提升',atk:1.45,def:1.15,rate:.35}];
+    let phaseIndex=(B.phase||1)-1;
+    while(phaseIndex<phases.length&&e.hp/e.maxHp<=phases[phaseIndex].at){
+      const ph=phases[phaseIndex];B.phase=phaseIndex+2;e.atk=Math.round(e.atk*ph.atk);
+      if(ph.def)e.def=Math.round(e.def*ph.def);
+      if(ph.shield)B.enemyShield=(B.enemyShield||0)+Math.round(e.maxHp*ph.shield);
+      if(ph.rate)B.phaseSkillRate=ph.rate;
+      B.log.push({t:'skill',m:ph.msg});phaseIndex++;
+    }
+  }
+  B.enemyStatus=B.enemyStatus||{bleed:0,burn:0,freeze:0,stun:0};
+  for(const k of ['bleed','burn']){
+    if(B.enemyStatus[k]>0){const d=Math.round(e.maxHp*(k==='bleed'?.02:.03)+e.atk*.2);hcxDamageEnemy(d);B.enemyStatus[k]--;B.log.push({t:'dmg',m:(k==='bleed'?'🩸 流血':'🔥 灼烧')+'造成 '+fmt(d)+' 点伤害'});}
+  }
+  if(e.hp<=0){await winBattle();return;}
+  if(B.enemyStatus.freeze>0||B.enemyStatus.stun>0){
+    const k=B.enemyStatus.freeze>0?'freeze':'stun';B.enemyStatus[k]--;B.log.push({t:'sys',m:'❄️ 敌人受到控制，跳过本回合'});hcxRegen();if(B.cd)Object.keys(B.cd).forEach(n=>{if(B.cd[n]>0)B.cd[n]--;});B.busy=false;save();render();return;
+  }
+  const oldHp=S.hp;
+  const oldCalc=calcDmg,guarding=(B.guard||0)>0,psNow=playerStats();let mitigation=guarding?.4:1;
+  if(S.cls==='spear'&&S.level>=10&&Math.random()<.15)mitigation*=.7;
+  if(S.cls==='priest'&&S.level>=60&&S.hp<=psNow.hp*.3)mitigation*=.8;
+  if(S.cls==='guardian'&&S.level>=60&&S.hp<=psNow.hp*.25)mitigation*=.65;
+  if(mitigation<1)calcDmg=function(...args){const r=oldCalc(...args);r.dmg=Math.max(1,Math.round(r.dmg*mitigation));return r;};
+  try{await __hcxOldEnemyTurn();}finally{calcDmg=oldCalc;if(guarding)B.guard=0;}
+  const taken=Math.max(0,oldHp-S.hp);
+  if(taken>0&&!B.over){hcxApplyDefenseTraits(taken);if(e.hp<=0&&!B.over)await winBattle();}
+  if(B&&!B.over){hcxRegen();if(B.cd)Object.keys(B.cd).forEach(k=>{if(k in B.cd&&B.cd[k]>0)B.cd[k]--;});}
+};
+const __hcxOldWinBattle=winBattle;
+winBattle=async function(){
+  if(!B||B.over)return;
+  const enemy=B.enemy;
+  if(enemy&&enemy.isBoss)S.bossKills=(S.bossKills||0)+1;
+  hcxKillTraits();
+  if(S.hcx&&S.hcx.moral.chosen==='anchor')S.gold+=Math.round(enemyGold(enemy)*.05);
+  await __hcxOldWinBattle();
+  const event=hcxActiveEvent();
+  if(event.effect==='gold'&&B.reward.gold){const bonus=Math.round(B.reward.gold*.2);S.gold+=bonus;B.log.push({t:'win',m:'💫 流星雨奖励 +'+fmt(bonus)+' CC'});}
+  if(event.effect==='drop'){
+    if(S.inv.length<(S.invCap||40)&&Math.random()<.5){const it=genEquip(pick(SLOTS).id,enemy.lv,Math.min(8,Math.max(1,Math.floor(enemy.lv/18)+rnd(0,2)+1)));S.inv.push(it);B.reward.items.push(it);B.log.push({t:'win',m:'🌌 星轨残骸额外掉落：'+it.name});}
+    else{const bonus=Math.round((B.reward.gold||0)*.1);S.gold+=bonus;B.log.push({t:'win',m:'🌌 星轨余辉折算 +'+fmt(bonus)+' CC'});}
+  }
+  if(event.effect==='blood'){const keys=Object.keys(MATS),mat=pick(keys);S.mats[mat]=(S.mats[mat]||0)+1;B.log.push({t:'win',m:'🩸 血潮战利品：'+MATS[mat][0]+' ×1'});}
+  if(S.cls==='alchemist'&&S.level>=30&&Math.random()<.3){const mat=pick(Object.keys(MATS));S.mats[mat]=(S.mats[mat]||0)+1;B.log.push({t:'win',m:'⚗️ 素材回收：'+MATS[mat][0]+' ×1'});}
+  if(event.effect==='guild'&&S.guildId){S.hcx.guildEventPoints=(S.hcx.guildEventPoints||0)+1;if(B.dungeon){const bonus=Math.round((B.reward.exp||0)*.1);S.exp+=bonus;B.log.push({t:'win',m:'⚔️ 公会集结副本奖励 +'+fmt(bonus)+' 经验'});levelUpCheck();}}
+  if(event.effect==='skill')progressSkillTask(enemy);
+  hcxCheckAchievements();
+  if(S.hcx){S.hcx.codex.mobs[enemy.name]=true;if(B&&B.dungeon)S.hcx.codex.dungeons[B.dungeon.name||String(B.dungeon)]=true;}
+  save();render();
+  HCX_SFX.win();hcxFloat('VICTORY','#fff0c5','32%',28);
+};
+const __hcxOldLoseBattle=loseBattle;
+loseBattle=async function(){await __hcxOldLoseBattle();hcxLoseDurability();save();render();HCX_SFX.lose();};
+const __hcxOldLevelUpCheck=levelUpCheck;
+levelUpCheck=function(){const old=S.level;__hcxOldLevelUpCheck();if(S.level>old){HCX_SFX.level();hcxFloat('LEVEL UP','#ffd700','28%',30);}hcxCheckAchievements();};
+const __hcxOldEnterDungeon=enterDungeon;
+enterDungeon=function(i){hcxInitSave();const fee=[0,50,200,600,1500,3500,8000][Number(UI.dungeonDiff)||0]||0;if(fee&&S.gold<fee){notify('进入当前难度需要 '+fmt(fee)+' CC');return;}if(fee)S.gold-=fee;__hcxOldEnterDungeon(i);if(B&&B.dungeon)S.hcx.codex.dungeons[B.dungeon.name||String(B.dungeon)]=true;save();};
+const __hcxOldWildMove=wildMove;
+wildMove=function(dir){__hcxOldWildMove(dir);if(S&&S.hcx){hcxFactionRep('empire',1);if(hcxActiveEvent().effect==='gold')S.gold+=2;}};
+const __hcxOldInit=window.onload;
+function hcxAppendCSS(){
+  const st=document.createElement('style');st.textContent=`
+    button:active:not(:disabled){transform:scale(.97)}
+    .hcx-banner{box-shadow:inset 0 0 28px rgba(121,216,208,.08)}
+    .hcx-star{filter:drop-shadow(0 0 8px #e5bd72)}
+    @media(max-width:560px){.hcx-banner{padding:11px!important}}
+  `;document.head.appendChild(st);
+}
+hcxAppendCSS();
+
+/* 扩展动作与原有 data-act 事件分开监听，避免干扰原事件委托 */
+document.getElementById('root').addEventListener('click',ev=>{
+  const b=ev.target.closest('[data-hcx]');if(!b)return;
+  ev.preventDefault();ev.stopPropagation();
+  hcxHandleAction(b.dataset.hcx,b.dataset.arg||'');
+});
+
+/* 包装原有渲染与存档：保证首次进入、读档都初始化扩展数据 */
+const __hcxOldSave=save;
+save=function(){if(S)hcxInitSave();return __hcxOldSave();};
+const __hcxOldLoad=load;
+load=function(){const ok=__hcxOldLoad();if(ok&&S){hcxInitSave();S.invCap=Math.max(40,Math.min(80,Number(S.invCap)||40));__hcxOldSave();}return ok;};
+
+
+
+/* ================= 2026-11-04 世界职业、地区经济与桌面适配扩展 ================= */
+const HCX_REGION_LIFE_UPDATE_20261104 = true;
+const HCX_REGION_LIFE = {
+  julius:{
+    name:'尤利乌帝国',hall:'帝国军官与行会联合训练所',mentor:'帝国职业导师团',
+    forge:{title:'军械制式锻造',desc:'帝国工匠擅长把武器与护甲锻造成稳定、可靠的战场装备。武器强化更容易成功，武器获得额外攻击，防具获得额外防御。',slots:['weapon','armor','helmet'],chance:.10,rate:.035,statBySlot:{weapon:'atk',armor:'def',helmet:'def'}},
+    goods:[{id:'j_corn',name:'金穗玉米',icon:'🌽',price:38,desc:'帝国南部农场的主粮，适合烤制旅行餐。'},{id:'j_wheat',name:'白橡小麦',icon:'🌾',price:28,desc:'常见谷物，也是酒馆面包的原料。'},{id:'j_apple',name:'红皮苹果',icon:'🍎',price:46,desc:'风车镇果园出产，酸甜多汁。'}]
+  },
+  caeria:{
+    name:'凯瑞亚七叶圣国',hall:'七叶学院·自然与奥术讲堂',mentor:'七叶导师议会',
+    forge:{title:'根脉生命锻造',desc:'凯瑞亚工匠以活木、树脂和灵泉淬炼装备。头盔、胸甲与靴子强化更容易成功，并获得额外生命。',slots:['helmet','armor','boots'],chance:.08,rate:.04,statBySlot:{helmet:'hp',armor:'hp',boots:'hp'}},
+    goods:[{id:'c_tomato',name:'青翠番茄',icon:'🍅',price:42,desc:'七叶温室培育的酸甜果实。'},{id:'c_mushroom',name:'荧叶蘑菇',icon:'🍄',price:58,desc:'生长在世界树根部的食用菌。'},{id:'c_honey',name:'花冠蜂蜜',icon:'🍯',price:75,desc:'森林蜂群酿造，常用于恢复料理。'}]
+  },
+  lonbass:{
+    name:'朗不斯自由城邦',hall:'金帆商会·佣兵职业公所',mentor:'自由职业公会评议员',
+    forge:{title:'航海精密锻造',desc:'朗不斯工匠擅长轻量化与精密加工。戒指、项链和腕饰强化成功率更高，并获得额外速度或暴击。',slots:['ring','necklace','bracelet'],chance:.12,rate:.035,statBySlot:{ring:'crit',necklace:'crit',bracelet:'spd'}},
+    goods:[{id:'l_fish',name:'银鳞海鱼',icon:'🐟',price:52,desc:'美鲁斯近海捕捞，酒馆常用食材。'},{id:'l_citrus',name:'金帆柑橘',icon:'🍊',price:64,desc:'商船从南方群岛运来的香甜水果。'},{id:'l_salt',name:'海晶盐',icon:'🧂',price:35,desc:'珊瑚浅滩晒制的洁白海盐。'}]
+  },
+  north:{
+    name:'永冻荒原·北境',hall:'塞维莉亚壁垒·符文战技院',mentor:'北境符文导师',
+    forge:{title:'寒铁符文锻造',desc:'北境铁匠用寒铁与古符文稳固装备。胸甲、护臂和头盔强化更容易成功，并获得额外防御或斗气。',slots:['armor','bracer','helmet'],chance:.09,rate:.04,statBySlot:{armor:'def',bracer:'mp',helmet:'def'}},
+    goods:[{id:'n_potato',name:'雪原土豆',icon:'🥔',price:34,desc:'耐寒作物，北境军团的常备口粮。'},{id:'n_berry',name:'霜莓',icon:'🫐',price:68,desc:'只在雪线附近成熟的酸甜浆果。'},{id:'n_meat',name:'烟熏驯鹿肉',icon:'🥩',price:88,desc:'北境猎户以冷杉木烟熏保存的肉食。'}]
+  }
+};
+
+Object.assign(HCX_REGION_LIFE,{
+  gatre:{name:'嘉特夫海尔',hall:'七王国遗制·骑士与工匠公所',mentor:'旧王国骑士导师',forge:{title:'白垩城垣锻造',desc:'嘉特夫海尔的工匠沿用七王国城防工艺，擅长盾甲与长兵器。护臂、胸甲和长枪类武器强化更稳固。',slots:['bracer','armor','weapon'],chance:.09,rate:.035,statBySlot:{bracer:'def',armor:'def',weapon:'atk'}},goods:[{id:'g_cheese',name:'白垩奶酪',icon:'🧀',price:55,desc:'海岸牧场以盐风熟成的奶酪。'},{id:'g_grape',name:'石墙葡萄',icon:'🍇',price:62,desc:'旧城墙外的梯田葡萄。'},{id:'g_onion',name:'灰土洋葱',icon:'🧅',price:31,desc:'耐储存的边境蔬菜。'}]},
+  wanaville:{name:'华纳维勒',hall:'浮空观星台·星轨术士公会',mentor:'古代观星者传承人',forge:{title:'星轨精密铭锻',desc:'观星者以星屑校准装备纹路。法器、项链与戒指更容易强化，并获得额外斗气或暴击。',slots:['weapon','necklace','ring'],chance:.10,rate:.04,statBySlot:{weapon:'mp',necklace:'crit',ring:'crit'}},goods:[{id:'w_starfruit',name:'星纹梨',icon:'🍐',price:82,desc:'浮空山脉果园培育的淡金色梨果。'},{id:'w_moonbean',name:'月豆',icon:'🫘',price:57,desc:'观星者常用来煮制夜间热粥。'},{id:'w_skytea',name:'云顶茶叶',icon:'🍃',price:96,desc:'生长于高空雾林的清香茶叶。'}]},
+  midheim:{name:'米德海姆',hall:'圣庭白银宪章·武备学院',mentor:'圣庭誓约导师',forge:{title:'白银誓约锻造',desc:'圣庭工匠以白银铭文强化守护装备。头盔、胸甲与项链获得更稳定的防护与生命加成。',slots:['helmet','armor','necklace'],chance:.09,rate:.04,statBySlot:{helmet:'def',armor:'hp',necklace:'hp'}},goods:[{id:'m_olive',name:'钟楼橄榄',icon:'🫒',price:49,desc:'钟楼山坡的老橄榄树所产。'},{id:'m_bread',name:'宪章黑麦面包',icon:'🍞',price:40,desc:'修道院烤炉制作的粗麦面包。'},{id:'m_plum',name:'银钟李',icon:'🍑',price:63,desc:'圣庭庭院里栽种的紫红色李果。'}]},
+  nifl:{name:'尼福尔',hall:'霜雾王庭·冰脉战技殿',mentor:'冰脉武技导师',forge:{title:'冰脉寒晶锻造',desc:'尼福尔工匠擅长寒晶淬火。武器、护臂和靴子强化时，额外获得斗气或速度。',slots:['weapon','bracer','boots'],chance:.08,rate:.04,statBySlot:{weapon:'mp',bracer:'def',boots:'spd'}},goods:[{id:'nif_cloudberry',name:'雾莓',icon:'🫐',price:74,desc:'常年雾层下生长的蓝紫浆果。'},{id:'nif_milk',name:'雪原羊乳',icon:'🥛',price:51,desc:'冰脉牧场每日限量供应。'},{id:'nif_root',name:'霜根萝卜',icon:'🥕',price:36,desc:'埋在冻土深处的耐寒根茎。'}]},
+  helheim:{name:'赫尔约海姆',hall:'黑峡湾·双首鹰佣兵团',mentor:'峡湾佣兵教官',forge:{title:'峡湾轻装锻造',desc:'沉船匠人重视轻便、灵活与快速出手。腕饰、靴子与武器强化更容易成功，并获得速度。',slots:['bracelet','boots','weapon'],chance:.11,rate:.035,statBySlot:{bracelet:'spd',boots:'spd',weapon:'atk'}},goods:[{id:'h_cod',name:'黑峡湾鳕鱼',icon:'🐟',price:48,desc:'黑色峡湾深水区捕获的鳕鱼。'},{id:'h_seaweed',name:'鹰羽海藻',icon:'🌿',price:29,desc:'附着在沉船木梁上的可食海藻。'},{id:'h_berry',name:'黑崖莓',icon:'🫐',price:67,desc:'生长在峡湾岩壁上的深色浆果。'}]},
+  muspel:{name:'穆斯贝尔',hall:'熔火王庭·黑曜石武备院',mentor:'熔炉战技宗师',forge:{title:'熔火黑曜锻造',desc:'穆斯贝尔以火山熔炉锻造重型装备。武器与胸甲强化成功率更高，攻击或防御额外提升。',slots:['weapon','armor','bracer'],chance:.12,rate:.045,statBySlot:{weapon:'atk',armor:'def',bracer:'atk'}},goods:[{id:'mu_pepper',name:'熔岩椒',icon:'🌶️',price:59,desc:'火山坡地种植的辛辣红椒。'},{id:'mu_tomato',name:'赤焰番茄',icon:'🍅',price:53,desc:'吸收火山矿物质长成的番茄。'},{id:'mu_cocoa',name:'黑曜可可豆',icon:'🫘',price:92,desc:'熔岩温室培育的苦香豆类。'}]},
+  heimqie:{name:'海姆垩',hall:'血泪边境·净化者训练营',mentor:'边境净化官',forge:{title:'血泪晶核锻造',desc:'边境工匠以血泪结晶稳定装备。头盔、护臂与戒指强化后获得额外防御或生命，但材料消耗略高。',slots:['helmet','bracer','ring'],chance:.07,rate:.05,statBySlot:{helmet:'hp',bracer:'def',ring:'hp'}},goods:[{id:'he_bloodroot',name:'血根甜菜',icon:'🫜',price:61,desc:'在异变土壤边缘种植的深红根茎。'},{id:'he_cranberry',name:'泣血莓',icon:'🍒',price:77,desc:'吸收血泪矿物质后呈暗红色的果实。'},{id:'he_mushroom',name:'灰脉菌',icon:'🍄',price:69,desc:'只在净化区外缘生长的菌类。'}]},
+  urangong:{name:'乌尔安恭',hall:'黄庭星轨·神宫传承院',mentor:'星轨遗民导师',forge:{title:'黄庭星轨锻造',desc:'古代神宫工艺能将星轨碎片嵌入饰品与武器。武器、项链和戒指强化后额外获得暴击或斗气。',slots:['weapon','necklace','ring'],chance:.10,rate:.05,statBySlot:{weapon:'crit',necklace:'mp',ring:'crit'}},goods:[{id:'u_sunfruit',name:'日轮果',icon:'🍑',price:104,desc:'古神宫温室保存下来的金色果实。'},{id:'u_stardate',name:'星枣',icon:'🌰',price:88,desc:'星轨残骸附近的古老枣树所产。'},{id:'u_saffron',name:'黄庭藏红花',icon:'🌺',price:126,desc:'用于祭礼与高级料理的珍贵香料。'}]},
+  galilantier:{name:'伽利兰提尔',hall:'黄金边境·古龙猎人议会',mentor:'黄金海远征导师',forge:{title:'黄金海龙骨锻造',desc:'黄金边境的工匠以古龙骨与金砂淬炼武装。高阶武器、胸甲和项链强化收益更高，费用也更昂贵。',slots:['weapon','armor','necklace'],chance:.08,rate:.06,statBySlot:{weapon:'atk',armor:'hp',necklace:'crit'}},goods:[{id:'ga_goldmelon',name:'金海蜜瓜',icon:'🍈',price:145,desc:'黄金海沿岸温室培育的稀有蜜瓜。'},{id:'ga_saffronfish',name:'金鳞鱼',icon:'🐠',price:132,desc:'黄金海浅滩才有的金色鱼种。'},{id:'ga_honey',name:'古龙花蜜',icon:'🍯',price:168,desc:'古龙巢穴周边高崖花丛采集的蜂蜜。'}]}
+});
+
+function hcxRegionLife(){return HCX_REGION_LIFE[WORLD_MAP[UI.curRegion]?.id]||HCX_REGION_LIFE.julius;}
+function hcxEnsureLifeSave(){
+  if(!S)return null;__hcxLifeOldInit();const x=S.hcx;
+  if(!x.profession)x.profession={advTrial:null,subTrial:null};
+  if(!x.profession.advTrial&&S.adv)x.profession.advTrial={done:true};
+  if(!x.profession.subTrial&&S.sub)x.profession.subTrial={done:true};
+  if(!x.goods)x.goods={};if(!Number.isFinite(Number(x.meals)))x.meals=0;
+  Object.values(HCX_REGION_LIFE).forEach(r=>r.goods.forEach(g=>{if(!Number.isFinite(Number(x.goods[g.id])))x.goods[g.id]=0;}));
+  return x;
+}
+const __hcxLifeOldInit=hcxInitSave;
+hcxInitSave=function(){__hcxLifeOldInit();if(S)hcxEnsureLifeSave();};
+const __hcxLifeOldSanitize=sanitizeItem;
+sanitizeItem=function(it){const o=__hcxLifeOldSanitize(it);if(!o)return null;if(Array.isArray(it.hcxForge))o.hcxForge=it.hcxForge.slice(-12).map(f=>({region:String(f.region||'').slice(0,32),label:String(f.label||'').slice(0,32),stat:STAT_KEYS.includes(f.stat)?f.stat:'atk',value:Math.max(0,Math.min(10000,Number(f.value)||0))}));return o;};
+
+function hcxProfessionProgress(kind){
+  const x=hcxEnsureLifeSave(),q=x.profession[kind+'Trial'];
+  if(!q||q.done)return q?.done?Number.MAX_SAFE_INTEGER:0;
+  return Math.max(0,(Number(S.kills)||0)-(Number(q.startKills)||0));
+}
+function hcxOpenClassHall(regionIndex){
+  const idx=clamp(Number(regionIndex)||0,0,WORLD_MAP.length-1);
+  UI.tab='explore';UI.wildActive=false;UI.curRegion=idx;UI.curCity=0;UI.mapLevel='building';UI.curBuilding='classhall';render();
+}
+function hcxRenderClassHall(){
+  hcxEnsureLifeSave();const x=S.hcx,pr=x.profession,c=CLASSES[S.cls],cfg=hcxRegionLife();
+  const advReq=3,subReq=3,advProg=hcxProfessionProgress('adv'),subProg=hcxProfessionProgress('sub');
+  const advFee=5000,subFee=8000;
+  const advChoices=(c.adv||[]).map(a=>`<div class="cls-card"><div class="nm">✦ ${escapeHtml(a.n)}</div><div class="ds">${escapeHtml(a.skill?.n||'职业专属技能')} · 进阶后获得专属属性成长</div><button data-hcx="professionAdvChoose" data-arg="${escapeHtml(a.n)}" ${S.level<30||advProg<advReq||S.gold<advFee?'disabled':''}>授予此进阶（${fmt(advFee)} CC）</button></div>`).join('');
+  const subChoices=Object.values(CLASSES).filter(z=>z.key!==S.cls).map(z=>`<div class="cls-card"><span class="ic">${z.icon}</span><div class="nm">${escapeHtml(z.name)}</div><div class="ds">副职业基础技能：${escapeHtml(z.skills[0].n)}</div><button data-hcx="professionSubChoose" data-arg="${z.key}" ${S.level<60||subProg<subReq||S.gold<subFee?'disabled':''}>拜师学习（${fmt(subFee)} CC）</button></div>`).join('');
+  const advStatus=S.adv?`<span class="ok">已进阶：${escapeHtml(S.adv)}</span>`:S.level<30?`<span class="small">达到 Lv.30 后可接取进阶试炼。</span>`:pr.advTrial?`<span class="hl">试炼进度 ${Math.min(advReq,advProg)}/${advReq}</span>`:`<span class="small">尚未接取试炼。</span>`;
+  const subStatus=S.sub?`<span class="ok">已学习：${escapeHtml(CLASSES[S.sub]?.name||S.sub)}</span>`:S.level<60?`<span class="small">达到 Lv.60 后可拜师学习副职业。</span>`:pr.subTrial?`<span class="hl">拜师试炼 ${Math.min(subReq,subProg)}/${subReq}</span>`:`<span class="small">尚未接取副职业试炼。</span>`;
+  return `<div class="hcx-hall-hero"><div style="font-size:42px">🏛️</div><div><h2>${escapeHtml(cfg.hall)}</h2><div class="small">${escapeHtml(cfg.mentor)} · ${escapeHtml(cfg.name)}</div></div></div>
+    <div class="card"><h3>📜 主职业档案</h3><div class="row"><span class="k">当前职业</span><span class="v">${c.icon} ${escapeHtml(c.name)}</span></div><p class="small">主职业在创建角色时选择。你可以在这里接受本职业的高阶传承；不同进阶方向会改变属性成长并解锁专属技能。</p><div class="row"><span class="k">进阶状态</span><span class="v">${advStatus}</span></div>
+    ${!S.adv&&S.level>=30&&!pr.advTrial?`<button data-hcx="professionAdvStart" style="width:100%">接受职业进阶试炼（需完成 ${advReq} 场胜利）</button>`:''}
+    ${!S.adv&&pr.advTrial&&!pr.advTrial.done?`<div class="small">从接取试炼后开始累计胜利场次，普通战斗与副本战斗均有效。</div><div class="bar"><div class="expfill" style="width:${Math.min(100,advProg/advReq*100)}%"></div><span>${Math.min(advReq,advProg)}/${advReq}</span></div>`:''}
+    ${!S.adv&&advProg>=advReq?`<h4 style="margin:12px 0 8px;color:var(--gold2)">选择你的进阶道路</h4><div class="grid">${advChoices}</div>`:''}</div>
+    <div class="card"><h3>📖 副职业拜师</h3><p class="small">副职业不是在角色面板上直接领取。你需要到职业公所拜访对应导师，完成三场试炼后，支付学费正式入门。副职业会提供该职业的一项基础技能，并允许使用对应职业武器。</p><div class="row"><span class="k">副职业状态</span><span class="v">${subStatus}</span></div>
+    ${!S.sub&&S.level>=60&&!pr.subTrial?`<button data-hcx="professionSubStart" style="width:100%">申请副职业入门试炼（需完成 ${subReq} 场胜利）</button>`:''}
+    ${!S.sub&&pr.subTrial&&!pr.subTrial.done?`<div class="bar"><div class="expfill" style="width:${Math.min(100,subProg/subReq*100)}%"></div><span>${Math.min(subReq,subProg)}/${subReq}</span></div>`:''}
+    ${!S.sub&&subProg>=subReq?`<h4 style="margin:12px 0 8px;color:var(--gold2)">选择副职业导师</h4><div class="grid">${subChoices}</div>`:''}</div>
+    <div class="card"><h3>🧭 各地职业机构</h3><div class="grid">${WORLD_MAP.map((r,i)=>`<div class="resource-cell"><span>${r.icon} ${escapeHtml(HCX_REGION_LIFE[r.id]?.hall||r.name+'职业公所')}</span><button data-hcx="openClassHall" data-arg="${i}">前往</button></div>`).join('')}</div></div>
+    <button data-act="nav" data-arg="back_building" style="width:100%">返回城市</button>`;
+}
+function hcxRenderProfessionDashboard(){
+  hcxEnsureLifeSave();const c=CLASSES[S.cls],x=S.hcx,pr=x.profession,ap=hcxProfessionProgress('adv'),sp=hcxProfessionProgress('sub');
+  return `<div class="card"><h2>⚔️ 职业成长与传承</h2><p class="small">职业成长由导师、试炼与传承组成。职业资格需要在世界中的职业机构取得，而不是从商城购买。</p><div class="row"><span class="k">主职业</span><span class="v">${c.icon} ${c.name}</span></div><div class="row"><span class="k">进阶职业</span><span class="v">${S.adv?escapeHtml(S.adv):'尚未进阶'}</span></div><div class="row"><span class="k">副职业</span><span class="v">${S.sub?escapeHtml(CLASSES[S.sub]?.name||S.sub):'尚未学习'}</span></div><div class="row"><span class="k">角色等级</span><span class="v">Lv.${S.level}</span></div></div>
+  <div class="card"><h3>进阶路线</h3><p class="small">Lv.30：接受主职业试炼 → 完成 3 场胜利 → 选择一条进阶分支 → 支付导师费用。</p><p class="small">当前进度：${S.adv?'已完成':pr.advTrial?Math.min(3,ap)+'/3 场':'尚未接取'}</p><h3 style="margin-top:12px">副职业路线</h3><p class="small">Lv.60：向职业导师申请拜师 → 完成 3 场胜利 → 选择另一职业 → 支付学费，获得其基础技能。</p><p class="small">当前进度：${S.sub?'已完成':pr.subTrial?Math.min(3,sp)+'/3 场':'尚未接取'}</p><button data-hcx="openClassHall" data-arg="${UI.curRegion||0}" style="width:100%;margin-top:8px">前往当前地区职业公所</button></div>
+  <div class="card"><h3>职业机构分布</h3><div class="grid">${WORLD_MAP.map((r,i)=>`<div class="resource-cell"><span>${r.icon} ${escapeHtml(r.name)}</span><button data-hcx="openClassHall" data-arg="${i}">前往导师处</button></div>`).join('')}</div></div>`;
+}
+function hcxRenderLocalMarket(){
+  hcxEnsureLifeSave();const cfg=hcxRegionLife(),goods=cfg.goods;
+  return `<div class="hcx-hall-hero"><div style="font-size:42px">🏪</div><div><h2>${escapeHtml(cfg.name)}地方集市</h2><div class="small">本地农户、渔民与商贩每日在此交易</div></div></div>
+    <div class="card"><h3>🌾 地区专属物产</h3><p class="small">各地商品不会完全相同。这里出售的是当地常见物产，可收集后制作旅行餐；前往其他地区可以发现不同的食材。</p>
+    ${goods.map(g=>`<div class="item" style="padding:12px;flex-wrap:wrap"><span style="font-size:28px">${g.icon}</span><span class="iname"><b>${escapeHtml(g.name)}</b><br><span class="small">${escapeHtml(g.desc)}</span><br><span class="small">持有：${S.hcx.goods[g.id]||0} · 单价：${fmt(g.price)} CC</span></span><span style="display:flex;gap:5px"><button data-hcx="buyGood" data-arg="${g.id}|1" ${S.gold<g.price?'disabled':''}>购买 ×1</button><button data-hcx="buyGood" data-arg="${g.id}|5" ${S.gold<g.price*5?'disabled':''}>购买 ×5</button></span></div>`).join('')}</div>
+    <div class="card"><h3>🍲 旅人餐制作</h3><p class="small">使用两份同种地方食材制作一份旅行餐。食用后恢复 35% 最大生命与斗气；战斗中不能使用。</p>
+    ${goods.map(g=>`<div class="row"><span class="k">${g.icon} ${escapeHtml(g.name)} ×${S.hcx.goods[g.id]||0}</span><button data-hcx="cookMeal" data-arg="${g.id}" ${(S.hcx.goods[g.id]||0)<2?'disabled':''}>烹制（2份）</button></div>`).join('')}</div>
+    <button data-act="nav" data-arg="back_building" style="width:100%">返回城市</button>`;
+}
+function hcxForgePanel(){
+  const cfg=hcxRegionLife(),f=cfg.forge;
+  return `<div class="card hcx-forge-panel"><h3>⚒️ 地区工艺：${escapeHtml(f.title)}</h3><p class="small">${escapeHtml(f.desc)}</p><div class="row"><span class="k">专精装备</span><span class="v">${f.slots.map(id=>SLOTS.find(z=>z.id===id)?.name||id).join('、')}</span></div><div class="row"><span class="k">强化加成</span><span class="v">专精装备成功率 +${Math.round(f.chance*100)}%</span></div><p class="small">在此处成功强化的装备会永久获得额外属性；换到其他地区的铁匠铺，可以继续接受当地工艺。</p></div>`;
+}
+function hcxBuyGood(id,qty){
+  hcxEnsureLifeSave();qty=clamp(Math.floor(Number(qty)||1),1,20);
+  const cfg=hcxRegionLife(),g=cfg.goods.find(z=>z.id===id);if(!g)return;
+  const cost=g.price*qty;if(S.gold<cost){notify('CC 不足，无法购买');return;}
+  S.gold-=cost;S.hcx.goods[id]=(S.hcx.goods[id]||0)+qty;save();render();notify('购入 '+g.name+' ×'+qty);
+}
+function hcxCookMeal(id){
+  hcxEnsureLifeSave();const cfg=hcxRegionLife(),g=cfg.goods.find(z=>z.id===id);if(!g||(S.hcx.goods[id]||0)<2){notify('需要两份相同食材');return;}
+  S.hcx.goods[id]-=2;S.hcx.meals++;save();render();notify('制作完成：旅行餐 ×1');
+}
+function hcxUseMeal(){
+  hcxEnsureLifeSave();if(B&&!B.over){notify('战斗中无法使用旅行餐');return;}if(S.hcx.meals<=0)return;
+  const p=playerStats();S.hp=Math.min(p.hp,S.hp+Math.ceil(p.hp*.35));S.mp=Math.min(p.mp,S.mp+Math.ceil(p.mp*.35));S.hcx.meals--;save();render();notify('食用旅行餐，恢复生命与斗气');
+}
+function hcxEnhanceAtForge(slotId){
+  if(!S||!S.equip?.[slotId])return;
+  if(UI.curBuilding!=='smith'){notify('请前往当地铁匠铺进行强化');return;}
+  const it=S.equip[slotId],lv=it.enhanceLevel||0,limit=ENHANCE_LIMITS[it.rar]||0;
+  if(lv>=limit){notify('已达到强化上限');return;}
+  const cost=getEnhanceCost(it);if(S.gold<cost.gold){notify('金币不足');return;}if((S.mats[cost.mat]||0)<cost.matCount){notify('材料不足：'+MATS[cost.mat][0]);return;}
+  const f=hcxRegionLife().forge,preferred=f.slots.includes(slotId),chance=Math.min(.98,Math.max(.3,.9-lv*.05)+(preferred?f.chance:0));
+  S.gold-=cost.gold;S.mats[cost.mat]-=cost.matCount;
+  if(Math.random()<chance){
+    it.enhanceLevel=lv+1;const stat=f.statBySlot[slotId]||'def';const base=Math.max(1,Number(it[stat])||1);const bonus=Math.max(1,Math.round(base*f.rate*(preferred?1:0.5)));it[stat]=base+bonus;
+    if(!Array.isArray(it.hcxForge))it.hcxForge=[];it.hcxForge.push({region:hcxRegionLife().name,label:f.title,stat,value:bonus});it.hcxForge=it.hcxForge.slice(-12);
+    notify('强化成功！+'+it.enhanceLevel+'，'+f.title+'额外 '+STAT_LABELS[stat]+' +'+bonus);
+    if(S.dailyQuests)S.dailyQuests.forEach(q=>{if(q.type==='enhance'&&!q.done){q.progress=(q.progress||0)+1;if(q.progress>=q.req)q.done=true;}});
+  }else notify('强化失败，材料已消耗；'+f.title+'仍保留原有属性');
+  syncVitals();save();render();if(window.syncMyProfile)syncMyProfile();
+}
+function hcxRenderAvatar(){
+  const eq=S.equip||{},rarColor=['#9b9b9b','#9bd18b','#70b9e8','#c18cff','#e6b95e','#ff9b55','#f36e8a','#f3e8a1','#8df4e7'];
+  const armor=eq.armor,helm=eq.helmet,weapon=eq.weapon,boots=eq.boots,bracer=eq.bracer;
+  const metal=armor?rarColor[armor.rar]:'#5a4030',helmColor=helm?rarColor[helm.rar]:'#5a4030',weaponColor=weapon?rarColor[weapon.rar]:'#aaa';
+  const weaponShape=!weapon?'':S.cls==='spear'?'M188 78 L194 274 M180 94 L194 66 L207 94 Z':S.cls==='archer'?'M194 86 Q230 168 194 246 M194 86 Q158 168 194 246 M194 86 L194 246':'M192 96 L198 246 M184 110 L202 110';
+  const head=helm?`<path d="M76 63 Q78 20 116 18 Q154 20 156 63 L145 70 L87 70Z" fill="${helmColor}" stroke="#f1d79a" stroke-width="3"/><path d="M88 65 L144 65" stroke="#20170f" stroke-width="5"/>`:`<path d="M82 66 Q76 22 116 20 Q154 22 150 66 Q137 43 116 42 Q95 43 82 66Z" fill="#342018"/>`;
+  return `<div class="hcx-avatar-card"><div class="hcx-avatar-stage"><svg viewBox="0 0 240 310" role="img" aria-label="${escapeHtml(S.name)}当前装备外观" class="hcx-full-avatar"><defs><linearGradient id="hcxBody" x2="0" y2="1"><stop stop-color="${metal}"/><stop offset="1" stop-color="#28212a"/></linearGradient><radialGradient id="hcxAura"><stop stop-color="#d4af6a" stop-opacity=".25"/><stop offset="1" stop-color="#0c0a08" stop-opacity="0"/></radialGradient></defs><ellipse cx="120" cy="152" rx="112" ry="148" fill="url(#hcxAura)"/><path d="${weaponShape}" fill="none" stroke="${weaponColor}" stroke-width="8" stroke-linecap="round"/><path d="M88 100 Q60 102 55 150 L62 204 L83 195 L96 142 M144 100 Q170 102 177 150 L170 204 L149 195 L136 142" fill="url(#hcxBody)" stroke="#d4af6a" stroke-width="3"/><path d="M89 91 Q120 75 151 91 L165 180 Q120 204 75 180Z" fill="url(#hcxBody)" stroke="#e6c98a" stroke-width="3"/><path d="M93 180 L87 270 L112 270 L120 195 L128 270 L153 270 L147 180Z" fill="#28232b" stroke="#bca06a" stroke-width="3"/><path d="M85 263 L113 263 L110 292 L72 292Z M127 263 L155 263 L168 292 L130 292Z" fill="${rarColor[boots?.rar||0]}" stroke="#e6c98a" stroke-width="2"/><ellipse cx="120" cy="61" rx="31" ry="37" fill="#d9ae8b" stroke="#6a4936" stroke-width="2"/>${head}<path d="M96 67 Q120 76 144 67" stroke="#d4af6a" stroke-width="3" fill="none"/><circle cx="108" cy="61" r="3" fill="#21170f"/><circle cx="132" cy="61" r="3" fill="#21170f"/><path d="M111 80 Q120 86 129 80" fill="none" stroke="#7a3c32" stroke-width="2"/><path d="M82 112 L120 135 L158 112" stroke="#f2dfb0" stroke-width="3" fill="none"/><path d="M88 153 L152 153" stroke="#d4af6a" stroke-width="3"/><path d="M104 103 L120 116 L136 103" fill="none" stroke="#fff0c5" stroke-width="3"/>${bracer?`<rect x="54" y="164" width="28" height="35" rx="5" fill="${rarColor[bracer.rar]}" stroke="#e6c98a"/>`:''}<rect x="1" y="1" width="238" height="308" rx="16" fill="none" stroke="#d4af6a" stroke-opacity=".65" stroke-width="2"/></svg></div><div class="hcx-avatar-info"><h3>${escapeHtml(S.name)}</h3><div class="small">${CLASSES[S.cls].icon} ${escapeHtml(CLASSES[S.cls].name)}${S.adv?' · '+escapeHtml(S.adv):''}</div><div class="hcx-equipped-grid">${SLOTS.map(z=>{const it=eq[z.id];return `<div class="resource-cell"><span>${z.icon} ${z.name}</span><b class="${it?'rar'+it.rar:'small'}">${it?escapeHtml(it.name):'未装备'}</b></div>`;}).join('')}</div><p class="small">角色外观会随头盔、护甲、靴子、护臂与武器装备变化；这是游戏内生成的动态立绘。</p></div></div>`;
+}
+
+
+const __hcxLifeOldResetBuild=hcxResetBuild;
+hcxResetBuild=function(){const a=S?.adv,b=S?.sub;__hcxLifeOldResetBuild();if(S&&((a&&!S.adv)||(b&&!S.sub))){hcxEnsureLifeSave();S.hcx.profession.advTrial=null;S.hcx.profession.subTrial=null;save();}};
+
+/* 职业、市场、工艺与角色外观页面接入 */
+WORLD_MAP.forEach((r)=>{
+  const c=r.cities&&r.cities[0];if(!c||!Array.isArray(c.buildings))return;
+  if(!c.buildings.some(b=>b.id==='classhall'))c.buildings.push({id:'classhall',name:HCX_REGION_LIFE[r.id]?.hall||'职业公所',icon:'🏛️'});
+  if(!c.buildings.some(b=>b.id==='localmarket'))c.buildings.push({id:'localmarket',name:'地方物产集市',icon:'🧺'});
+  const forgeName=(HCX_REGION_LIFE[r.id]?.forge?.title||'地区特色')+'工坊';
+  const existingSmith=c.buildings.find(b=>b.id==='smith');
+  if(existingSmith)existingSmith.name=forgeName;else c.buildings.push({id:'smith',name:forgeName,icon:'⚒️'});
+});
+const __hcxLifeOldRenderExplore=renderExplore;
+renderExplore=function(){
+  if(UI.curBuilding==='classhall')return hcxRenderClassHall();
+  if(UI.curBuilding==='localmarket')return hcxRenderLocalMarket();
+  const out=__hcxLifeOldRenderExplore();
+  if(UI.curBuilding==='smith')return out+hcxForgePanel();
+  return out;
+};
+const __hcxLifeOldRenderCharacter=hcxRenderCharacter;
+hcxRenderCharacter=function(p){
+  let out=__hcxLifeOldRenderCharacter(p);
+  out=out.replace(/data-act="adv"/g,'data-hcx="blockedAdv"').replace(/data-act="sub"/g,'data-hcx="blockedSub"').replace('职业进阶（30级）','职业进阶（前往职业公所）').replace('副职业（60级）','副职业（前往职业公所）');
+  return hcxRenderAvatar()+`<div class="card"><h3>🏛️ 职业传承</h3><p class="small">进阶职业与副职业必须前往各地区的职业公所，向导师接受试炼并完成拜师手续。</p><button data-hcx="openClassHall" data-arg="${UI.curRegion||0}" style="width:100%">前往职业公所</button></div>`+out;
+};
+const __hcxLifeOldRenderInventory=hcxRenderInventory;
+hcxRenderInventory=function(p){
+  let out=__hcxLifeOldRenderInventory(p);hcxEnsureLifeSave();const x=S.hcx;
+  const goods=Object.values(HCX_REGION_LIFE).flatMap(r=>r.goods).filter(g=>(x.goods[g.id]||0)>0);
+  out+=`<div class="card"><h3>🧺 地方物产与旅行餐</h3>${goods.length?goods.map(g=>`<div class="row"><span class="k">${g.icon} ${escapeHtml(g.name)}</span><span class="v">×${x.goods[g.id]}</span></div>`).join(''):'<p class="small">尚未收集地方物产。前往各地区的地方集市购买特色食材。</p>'}<div class="row"><span class="k">🍱 旅行餐</span><span class="v">×${x.meals}</span></div><button data-hcx="useMeal" ${x.meals<=0||!!B?'disabled':''} style="width:100%">食用旅行餐（恢复 35% 生命与斗气）</button></div>`;
+  return out;
+};
+const __hcxLifeOldRenderView=renderView;
+renderView=function(p){if(UI.tab==='profession')return hcxRenderProfessionDashboard();return __hcxLifeOldRenderView(p);};
+const __hcxLifeOldRenderMain=renderMain;
+renderMain=function(){let out=__hcxLifeOldRenderMain();out=out.replace(/(<button[^>]*data-act="tab" data-arg="expansion"[^>]*>星轨志<\/button>)/,'$1<button class="'+(UI.tab==='profession'?'active':'')+'" data-act="tab" data-arg="profession">职业</button>');return out;};
+
+/* 覆盖旧式一键强化：强化地点与地区工艺现在会改变实际数值 */
+enhanceItem=function(slotId){hcxEnhanceAtForge(slotId);};
+const __hcxLifeOldHandleAction=hcxHandleAction;
+hcxHandleAction=function(action,arg){
+  hcxEnsureLifeSave();
+  if(action==='openClassHall'){hcxOpenClassHall(arg);return true;}
+  if(action==='blockedAdv'||action==='blockedSub'){notify('请前往探索地图中的职业公所，向导师完成试炼后再进行选择');return true;}
+  if(action==='professionAdvStart'){
+    if(S.level<30||S.adv){notify('需要 Lv.30，且尚未完成进阶');return true;}
+    S.hcx.profession.advTrial={startKills:Number(S.kills)||0,req:3,startedAt:Date.now()};save();render();notify('已接受职业进阶试炼：取得 3 场胜利');return true;
+  }
+  if(action==='professionAdvChoose'){
+    const c=CLASSES[S.cls],a=c.adv.find(z=>z.n===arg),q=S.hcx.profession.advTrial;
+    if(!a||S.level<30||!q||hcxProfessionProgress('adv')<3){notify('尚未完成进阶试炼');return true;}
+    if(S.gold<5000){notify('导师费用需要 5,000 CC');return true;}
+    S.gold-=5000;S.adv=a.n;S.hcx.profession.advTrial={done:true,completedAt:Date.now()};S.hp=playerStats().hp;S.mp=playerStats().mp;save();render();if(socialReady())syncMyProfile();notify('进阶授予：'+a.n);return true;
+  }
+  if(action==='professionSubStart'){
+    if(S.level<60||S.sub){notify('需要 Lv.60，且尚未学习副职业');return true;}
+    S.hcx.profession.subTrial={startKills:Number(S.kills)||0,req:3,startedAt:Date.now()};save();render();notify('已接受副职业试炼：取得 3 场胜利');return true;
+  }
+  if(action==='professionSubChoose'){
+    if(!CLASSES[arg]||arg===S.cls||S.level<60||!S.hcx.profession.subTrial||hcxProfessionProgress('sub')<3){notify('尚未完成副职业拜师试炼');return true;}
+    if(S.gold<8000){notify('副职业学费需要 8,000 CC');return true;}
+    S.gold-=8000;S.sub=arg;S.hcx.profession.subTrial={done:true,completedAt:Date.now()};save();render();if(socialReady())syncMyProfile();notify('拜师成功：'+CLASSES[arg].name+'，已学会基础技能');return true;
+  }
+  if(action==='buyGood'){const [id,n]=String(arg).split('|');hcxBuyGood(id,Number(n));return true;}
+  if(action==='cookMeal'){hcxCookMeal(arg);return true;}
+  if(action==='useMeal'){hcxUseMeal();return true;}
+  return __hcxLifeOldHandleAction(action,arg);
+};
+
+function hcxDesktopAndLifeCSS(){
+ const st=document.createElement('style');st.id='hcx-desktop-life-style';st.textContent=`
+  .hcx-hall-hero{display:flex;align-items:center;gap:16px;padding:18px;margin-bottom:12px;border:1px solid rgba(212,175,106,.35);border-radius:12px;background:radial-gradient(circle at 80% 20%,rgba(121,216,208,.15),transparent 35%),linear-gradient(130deg,#252019,#11101a)}
+  .hcx-avatar-card{display:grid;grid-template-columns:minmax(180px,260px) minmax(0,1fr);gap:18px;align-items:center;padding:18px;margin-bottom:12px;border:1px solid rgba(212,175,106,.4);border-radius:12px;background:linear-gradient(140deg,#211b18,#0d0b0c)}
+  .hcx-avatar-stage{display:flex;justify-content:center;align-items:center;min-height:280px;background:radial-gradient(ellipse,rgba(212,175,106,.12),transparent 70%)}
+  .hcx-full-avatar{width:min(100%,250px);height:auto;filter:drop-shadow(0 10px 18px rgba(0,0,0,.45))}
+  .hcx-equipped-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:12px 0}
+  .hcx-equipped-grid .resource-cell{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .hcx-equipped-grid b{font-size:12px;overflow-wrap:anywhere}
+  .hcx-forge-panel{border-color:rgba(212,175,106,.55);background:linear-gradient(135deg,rgba(61,43,22,.75),rgba(18,15,12,.95))}
+  @media(min-width:900px){
+    body{font-size:17px;padding:22px;line-height:1.72}
+    #root{max-width:1500px;width:min(96vw,1500px)}
+    .card{padding:22px;border-radius:9px;margin-bottom:14px}
+    button{font-size:15px;padding:11px 17px;min-height:42px}
+    input{font-size:16px;padding:12px 14px}
+    .tabs{gap:9px}.tabs button{font-size:15px;min-width:90px;padding:12px 14px;flex:0 1 auto}
+    .topbar{padding:15px 20px;gap:14px}.pname{font-size:20px}.tag{font-size:13px;padding:4px 11px}
+    .small{font-size:14px!important}.row{padding:7px 0}.grid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+    .item{padding:13px!important;gap:12px}.resource-cell{padding:12px;min-height:52px}
+    .hcx-avatar-card{grid-template-columns:minmax(250px,340px) minmax(0,1fr);gap:26px;padding:24px}
+    .hcx-avatar-stage{min-height:390px}.hcx-full-avatar{width:min(100%,320px)}
+    h1{font-size:48px}h2{font-size:28px}h3{font-size:22px}
+  }
+  @media(min-width:1400px){#root{max-width:1640px}.card{padding:25px}.hcx-avatar-card{grid-template-columns:360px 1fr}}
+  @media(max-width:700px){.hcx-avatar-card{grid-template-columns:1fr}.hcx-avatar-stage{min-height:240px}.hcx-full-avatar{max-width:210px}.hcx-equipped-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hcx-hall-hero{padding:12px}}
+  @media(prefers-reduced-motion:reduce){.hcx-full-avatar,button{transition:none!important}}
+ `;document.head.appendChild(st);
+}
+hcxDesktopAndLifeCSS();
+
 (function init(){
   if(load()){syncVitals();render();}
   else{render();}
